@@ -4,18 +4,38 @@ const cors = require("cors");
 const { Server } = require("socket.io");
 
 const app = express();
+
+// Middleware CORS para Express (útil se você tiver outras rotas HTTP/REST)
 app.use(cors());
 
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+// --- Rota de Teste para a Raiz (/) ---
+// Isso evita o erro 404 Not Found quando o navegador acessa a URL base do seu backend.
+app.get('/', (req, res) => {
+  res.status(200).send("Stop Game Backend is running and ready for Socket.IO connections!");
+});
+// ------------------------------------
 
-const players = {}; // userId -> { id: socket.id, nickname, room, isCreator }
+const server = http.createServer(app);
+
+// --- Configuração do Socket.IO com CORS específico ---
+// Substitua "https://SEU_DOMINIO_NETLIFY.netlify.app" pela URL EXATA do seu frontend no Netlify.
+// Exemplo: "https://seu-jogo-legal.netlify.app"
+const io = new Server(server, {
+  cors: {
+    origin: "https://SEU_DOMINIO_NETLIFY.netlify.app", // <--- MUITO IMPORTANTE: MUDAR AQUI!
+    methods: ["GET", "POST"]
+  }
+});
+
+// --- Variáveis de Estado do Jogo ---
+const players = {}; // userId -> { id: socket.id, nickname, room, isCreator, userId }
 const roomsAnswers = {}; // room -> [{ id: userId, nickname, answers: [{ theme, answer, points }] }]
 const stopCallers = {}; // room -> userId do jogador que clicou STOP
 const validationStates = {}; // room -> { currentPlayerIndex, currentThemeIndex, validatorId, roundLetter }
 const roomConfigs = {}; // room -> { themes: [], duration, creatorId, currentLetter, roundTimerId, roundActive, countdownTimerId }
 const roomOverallScores = {}; // room -> { userId: totalScoreForGame }
 
+// --- Eventos do Socket.IO ---
 io.on("connection", (socket) => {
   socket.userId = null;
   socket.room = null;
@@ -40,7 +60,7 @@ io.on("connection", (socket) => {
       const roomHasCreator = Object.values(players).some((p) => p.room === room && p.isCreator);
       const isCreator = !roomHasCreator;
 
-      players[userId] = { id: socket.id, nickname, room, isCreator, userId }; // Adiciona userId ao objeto do player
+      players[userId] = { id: socket.id, nickname, room, isCreator, userId };
 
       if (!roomConfigs[room]) {
         roomConfigs[room] = {
@@ -50,7 +70,7 @@ io.on("connection", (socket) => {
           currentLetter: null,
           roundTimerId: null,
           roundActive: false,
-          countdownTimerId: null, // Novo: ID do timer da contagem regressiva
+          countdownTimerId: null,
         };
       } else if (isCreator && roomConfigs[room].creatorId === undefined) {
         roomConfigs[room].creatorId = userId;
@@ -80,7 +100,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("update_config", ({ room, duration, themes }) => {
-    // A room é recebida aqui
     const userId = socket.userId;
     if (!room) {
         console.warn(`[Socket.io] update_config: Sala indefinida para ${userId}.`);
@@ -90,14 +109,13 @@ io.on("connection", (socket) => {
     if (config && config.creatorId === userId) {
       if (duration !== undefined) config.duration = duration;
       if (themes !== undefined) config.themes = themes;
-      io.to(room).emit("room_config", config); // Emitir para todos na sala
+      io.to(room).emit("room_config", config);
       console.log(`[Socket.io] Configuração da sala ${room} atualizada por ${userId}.`);
     } else {
         console.warn(`[Socket.io] update_config: ${userId} não é o criador ou sala ${room} não encontrada.`);
     }
   });
 
-  // NOVO EVENTO: Inicia a contagem regressiva no frontend
   socket.on("start_round", ({ room }) => {
     if (!room) {
       console.warn(`[Socket.io] start_round: Sala indefinida para ${socket.userId}.`);
@@ -109,7 +127,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if (config.roundActive || config.countdownTimerId) { // Evita iniciar várias rodadas
+    if (config.roundActive || config.countdownTimerId) {
       console.log(`[Socket.io] Rodada ou countdown já ativo na sala ${room}. Ignorando start_round.`);
       return;
     }
@@ -120,22 +138,15 @@ io.on("connection", (socket) => {
     validationStates[room] = null;
     if (config.roundTimerId) clearTimeout(config.roundTimerId);
 
-    // Inicia a contagem regressiva de 3 segundos no frontend
     io.to(room).emit("round_start_countdown", { initialCountdown: 3 });
     console.log(`[Socket.io] Iniciando contagem regressiva para a rodada na sala ${room}.`);
 
-    // Define um timer no backend para realmente iniciar a rodada APÓS a contagem regressiva
-    // Isso garante que o backend "saiba" quando a rodada deve começar de fato
     config.countdownTimerId = setTimeout(() => {
-      // O backend não precisa emitir 'round_started' aqui, o frontend fará isso via 'start_game_actual'
-      // após sua própria contagem.
-      config.countdownTimerId = null; // Limpa o ID do timer da contagem
+      config.countdownTimerId = null;
       console.log(`[Socket.io] Backend: Countdown para sala ${room} finalizado.`);
-      // O frontend agora envia 'start_game_actual' quando seu countdown termina
-    }, 3000); // 3 segundos para a contagem regressiva
+    }, 3000);
   });
 
-  // NOVO EVENTO: Frontend avisa que a contagem regressiva local terminou e a rodada deve começar
   socket.on("start_game_actual", ({ room }) => {
     const config = roomConfigs[room];
     if (!config) {
@@ -151,7 +162,7 @@ io.on("connection", (socket) => {
     const newLetter = getRandomLetter();
     config.currentLetter = newLetter;
     config.roundActive = true;
-    io.to(room).emit("room_config", config); // Envia config atualizada com a nova letra
+    io.to(room).emit("room_config", config);
 
     io.to(room).emit("round_started", { duration: config.duration, letter: newLetter });
     console.log(`[Socket.io] Rodada iniciada *de fato* na sala ${room} com a letra ${newLetter}.`);
@@ -186,7 +197,7 @@ io.on("connection", (socket) => {
     }
     config.roundActive = false;
     stopCallers[room] = socket.userId;
-    io.to(room).emit("round_ended"); // Este evento será ouvido pelo frontend
+    io.to(room).emit("round_ended");
     initiateValidationAfterDelay(room);
   });
 
@@ -316,7 +327,7 @@ io.on("connection", (socket) => {
         themeIndex: state.currentThemeIndex,
         theme: currentThemeData.theme,
         answer: currentThemeData.answer,
-        validated: false,
+        validated: currentThemeData.validated || false,
         isLastAnswerOfTheme: isLastPlayerOfTheme,
         isLastAnswerOfGame: isLastPlayerOfTheme && isLastThemeOfGame,
       },
@@ -335,14 +346,14 @@ io.on("connection", (socket) => {
         clearTimeout(roomConfigs[room].roundTimerId);
         roomConfigs[room].roundTimerId = null;
       }
-      if (roomConfigs[room].countdownTimerId) { // Limpa o timer do countdown também
+      if (roomConfigs[room].countdownTimerId) {
         clearTimeout(roomConfigs[room].countdownTimerId);
         roomConfigs[room].countdownTimerId = null;
       }
       roomConfigs[room].currentLetter = null;
       roomConfigs[room].roundActive = false;
       io.to(room).emit("room_reset_ack");
-      io.to(room).emit("room_config", roomConfigs[room]); // Envia a config para atualizar temas, duração, etc.
+      io.to(room).emit("room_config", roomConfigs[room]);
     }
   });
 
@@ -357,7 +368,6 @@ io.on("connection", (socket) => {
     const ranking = finalScores.sort((a, b) => b.total - a.total);
     io.to(room).emit("game_ended", ranking);
 
-    // Limpa os dados da sala após o jogo terminar
     delete roomsAnswers[room];
     delete stopCallers[room];
     delete validationStates[room];
@@ -516,6 +526,9 @@ function initiateValidationAfterDelay(room) {
   }, submissionGracePeriodMs);
 }
 
-server.listen(3001, () => {
-  console.log("✅ Servidor rodando na porta 3001");
+// --- Inicia o Servidor ---
+// Usa a porta fornecida pelo ambiente (Render) ou 3001 para desenvolvimento local.
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+  console.log(`✅ Servidor rodando na porta ${PORT}`);
 });

@@ -1,14 +1,15 @@
 // socket.js
-import { io } from "socket.io-client";
+import { io } from "https://stop-game-backend.onrender.com";
+
+// Substitua 'SUA_URL_DO_BACKEND_DO_RENDER' pela URL real do seu backend no Render.
+// Exemplo: 'https://stop-game-api.onrender.com'
+const BACKEND_URL_PROD = "SUA_URL_DO_BACKEND_DO_RENDER"; 
 
 // Define a URL do backend com base no ambiente.
-// Em desenvolvimento (local), conecta-se a http://localhost:3001.
-// Em produção, o 'undefined' fará com que o socket.io tente se conectar ao mesmo host
-// de onde o frontend foi servido.
-const URL = process.env.NODE_ENV === 'production' ? undefined : "http://localhost:3001";
+const URL = process.env.NODE_ENV === 'production' ? BACKEND_URL_PROD : "http://localhost:3001";
 
 export const socket = io(URL, {
-  autoConnect: true // <--- CORREÇÃO AQUI: Habilita a conexão automática ao carregar.
+  autoConnect: true 
 });
 
 // Logs para depuração da conexão do Socket.IO no cliente

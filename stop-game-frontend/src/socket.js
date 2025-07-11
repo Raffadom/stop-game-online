@@ -1,9 +1,9 @@
 // socket.js
-import { io } from "https://stop-game-backend.onrender.com";
+import { io } from "socket.io-client";
 
 // Substitua 'SUA_URL_DO_BACKEND_DO_RENDER' pela URL real do seu backend no Render.
 // Exemplo: 'https://stop-game-api.onrender.com'
-const BACKEND_URL_PROD = "SUA_URL_DO_BACKEND_DO_RENDER"; 
+const BACKEND_URL_PROD = "https://stop-game-backend.onrender.com"; 
 
 // Define a URL do backend com base no ambiente.
 const URL = process.env.NODE_ENV === 'production' ? BACKEND_URL_PROD : "http://localhost:3001";

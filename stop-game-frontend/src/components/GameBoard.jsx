@@ -289,20 +289,6 @@ export default function GameBoard({
               </div>
             ))}
           </div>
-
-          {/* Botão de Submeter Respostas (visível apenas durante a rodada ativa) */}
-          {/* Este botão já estava aqui, mantido para submeter ao final do tempo */}
-          {roundStarted && !roundEnded && (
-            <div className="flex justify-center mt-4">
-              <button
-                onClick={() => socket.emit("submit_answers", answers)}
-                className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-lg shadow-md transition-colors duration-200 font-semibold w-full max-w-xs"
-              >
-                Submeter Respostas
-              </button>
-            </div>
-          )}
-
           {/* NOVO: Botão STOP ao final dos temas para facilitar o acesso em mobile */}
           {roundStarted && !roundEnded && !stopClickedByMe && (
             <div className="flex justify-center mt-4">

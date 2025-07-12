@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react"; // <--- Importe useState
 import GameBoard from "./GameBoard";
 import Timer from "./Timer";
 
@@ -9,9 +9,9 @@ export default function Room({
   playersInRoom,
   isAdmin,
   roomThemes,
-  setRoomThemes, // Agora é um handler, ex: handleChangeRoomThemes
+  setRoomThemes,
   roomDuration,
-  setRoomDuration, // Agora é um handler, ex: handleChangeRoomDuration
+  setRoomDuration,
   letter,
   roundStarted,
   roundEnded,
@@ -23,6 +23,25 @@ export default function Room({
   handleLeaveRoom,
   onResetRound,
 }) {
+  // NOVO ESTADO: Para controlar a visibilidade da mensagem de "copiado"
+  const [showCopiedMessage, setShowCopiedMessage] = useState(false);
+
+  // NOVA FUNÇÃO: Para lidar com a cópia e mostrar a mensagem
+  const handleShareRoomLink = () => {
+    const roomLink = `${window.location.origin}/room/${room}`;
+    navigator.clipboard.writeText(roomLink)
+      .then(() => {
+        setShowCopiedMessage(true); // Exibe a mensagem
+        setTimeout(() => {
+          setShowCopiedMessage(false); // Esconde a mensagem após 2 segundos
+        }, 2000);
+      })
+      .catch((err) => {
+        console.error('Erro ao copiar o link: ', err);
+        // Opcional: Adicionar algum feedback de erro para o usuário
+      });
+  };
+
   return (
     <div className="flex flex-col min-h-screen max-w-5xl mx-auto px-4 py-6 space-y-8">
       {/* Informações da Sala */}
@@ -30,12 +49,19 @@ export default function Room({
         <div className="text-lg font-semibold text-gray-700">
           Sala: <span className="font-bold text-blue-600">{room}</span>
           <button
-            onClick={() => navigator.clipboard.writeText(`${window.location.origin}/room/${room}`)}
+            // CHAMAR A NOVA FUNÇÃO AQUI
+            onClick={handleShareRoomLink}
             className="ml-4 px-3 py-1 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300 transition-colors"
             title="Copiar link da sala"
           >
             🔗 Compartilhar
           </button>
+          {/* MENSAGEM DE FEEDBACK */}
+          {showCopiedMessage && (
+            <span className="ml-2 text-sm text-green-600 font-medium animate-fade-in">
+              Link da sala copiado!
+            </span>
+          )}
         </div>
         <div className="text-lg font-semibold text-gray-700">
           Jogadores:{" "}
@@ -60,6 +86,8 @@ export default function Room({
         )}
       </div>
 
+      {/* ... (o restante do seu componente Room.jsx permanece o mesmo) ... */}
+
       {/* Controles da Rodada */}
       <div className="bg-white p-6 rounded-xl shadow w-full flex flex-col items-center space-y-4">
         {isAdmin && !roundStarted && !roundEnded && countdown === null && (
@@ -70,7 +98,7 @@ export default function Room({
                 id="duration-input"
                 type="number"
                 value={roomDuration}
-                onChange={(e) => setRoomDuration(Number(e.target.value))} // Usa o handler da prop
+                onChange={(e) => setRoomDuration(Number(e.target.value))}
                 className="w-24 border border-gray-300 p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-400"
                 min={10}
                 max={300}
@@ -117,7 +145,7 @@ export default function Room({
           userId={userId}
           isAdmin={isAdmin}
           roomThemes={roomThemes}
-          setRoomThemes={setRoomThemes} // Passa o handler para GameBoard
+          setRoomThemes={setRoomThemes}
           roomDuration={roomDuration}
         />
       </div>

@@ -29,9 +29,9 @@ export default function Timer({ duration }) {
   const displayTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
   return (
-    <div className="text-center text-lg font-bold">
+    <div className="text-center text-lg font-bold dark:text-gray-100"> {/* Adicionada classe dark:text-gray-100 */}
       Tempo restante:{" "}
-      <span className={time <= 10 ? "text-red-600 animate-pulse" : "text-blue-600"}>
+      <span className={time <= 10 ? "text-red-600 dark:text-red-400 animate-pulse" : "text-blue-600 dark:text-blue-400"}> {/* Adicionadas classes dark:text-red-400 e dark:text-blue-400 */}
         {displayTime}
       </span>
     </div>

@@ -12,11 +12,9 @@ export default function GameBoard({
   userId,
   roomThemes,
   setRoomThemes,
-  // roomDuration, // Não usado diretamente aqui
-  setRoomDuration, // <--- Prop adicionada para o GameBoard? Se não for usada, pode remover.
-  // Se for usada para exibir a duração na modal de temas, é ok.
-  stopClickedByMe, // <--- Esta prop agora é essencial aqui!
-  handleStopRound, // <--- Esta prop agora é essencial aqui!
+  setRoomDuration,
+  stopClickedByMe,
+  handleStopRound,
 }) {
   const maxThemes = 10;
   const [answers, setAnswers] = useState([]);
@@ -213,22 +211,22 @@ export default function GameBoard({
     <div className="w-full h-full flex flex-col space-y-6">
       {/* Letra da Rodada (visível apenas quando a rodada está ativa) */}
       {letter && roundStarted && !roundEnded && (
-        <div className="text-center text-3xl font-bold mb-4 text-blue-700 select-none">
+        <div className="text-center text-3xl font-bold mb-4 text-blue-700 select-none dark:text-blue-400"> {/* Added dark class */}
           Letra da rodada: <span className="text-5xl">{letter}</span>
         </div>
       )}
 
       {/* Seção de gerenciamento de temas (apenas para Admin e fora da rodada) */}
       {isAdmin && !roundStarted && !roundEnded && !finalRanking && (
-        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-          <h3 className="text-xl font-semibold mb-3 text-gray-700">Gerenciar Temas</h3>
+        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 dark:bg-gray-700 dark:border-gray-600"> {/* Added dark classes */}
+          <h3 className="text-xl font-semibold mb-3 text-gray-700 dark:text-gray-100">Gerenciar Temas</h3> {/* Added dark class */}
           <div className="flex flex-col sm:flex-row gap-2 mb-3">
             <input
               type="text"
               placeholder="Novo Tema"
               value={newThemeInput}
               onChange={(e) => setNewThemeInput(e.target.value)}
-              className="flex-grow p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="flex-grow p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-50" // Added dark classes
             />
             <button
               onClick={handleAddTheme}
@@ -242,13 +240,13 @@ export default function GameBoard({
             {roomThemes.map((theme, index) => (
               <span
                 key={theme + index}
-                className="flex items-center bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium"
+                className="flex items-center bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium dark:bg-blue-800 dark:text-blue-100" // Added dark classes
               >
                 {theme}
                 {roomThemes.length > 1 && (
                   <button
                     onClick={() => handleRemoveTheme(theme)}
-                    className="ml-2 text-blue-600 hover:text-blue-900 focus:outline-none"
+                    className="ml-2 text-blue-600 hover:text-blue-900 focus:outline-none dark:text-blue-300 dark:hover:text-blue-100" // Added dark classes
                     title="Remover tema"
                   >
                     &times;
@@ -267,9 +265,9 @@ export default function GameBoard({
             {answers.map((answerItem, i) => (
               <div
                 key={answerItem.theme + i}
-                className="flex flex-col bg-gray-50 p-4 rounded shadow-sm min-w-[200px]"
+                className="flex flex-col bg-gray-50 p-4 rounded shadow-sm min-w-[200px] dark:bg-gray-700" // Added dark class
               >
-                <label className="block text-gray-700 font-medium mb-1 truncate" title={answerItem.theme}>
+                <label className="block text-gray-700 font-medium mb-1 truncate dark:text-gray-100" title={answerItem.theme}> {/* Added dark class */}
                   {answerItem.theme}
                 </label>
                 <input
@@ -278,7 +276,7 @@ export default function GameBoard({
                   value={answerItem.answer}
                   disabled={!roundStarted || roundEnded}
                   onChange={(e) => handleAnswerInputChange(i, e.target.value)}
-                  className="mb-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-400"
+                  className="mb-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-400 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-50" // Added dark classes
                 />
                 {showResults && answerItem.points !== null && (
                   <div className="text-sm text-right font-semibold"
@@ -301,7 +299,7 @@ export default function GameBoard({
             </div>
           )}
           {roundStarted && !roundEnded && stopClickedByMe && (
-            <div className="text-red-600 font-semibold mt-4 text-lg text-center">
+            <div className="text-red-600 font-semibold mt-4 text-lg text-center dark:text-red-400"> {/* Added dark class */}
               Você clicou em STOP! Aguardando outros jogadores...
             </div>
           )}
@@ -309,10 +307,10 @@ export default function GameBoard({
           {/* Resultados da Rodada (visível após a validação) */}
           {showResults && totalPoints !== null && (
             <div className="text-center mt-4">
-              <div className="text-2xl font-bold text-purple-700">
+              <div className="text-2xl font-bold text-purple-700 dark:text-purple-400"> {/* Added dark class */}
                 Total da Rodada: {totalPoints} pontos
               </div>
-              <div className="text-xl font-bold text-gray-800 mt-2">
+              <div className="text-xl font-bold text-gray-800 mt-2 dark:text-gray-100"> {/* Added dark class */}
                 Total da Partida: {playerOverallScore} pontos
               </div>
               <div className="flex justify-center space-x-6 mt-4">
@@ -336,8 +334,8 @@ export default function GameBoard({
 
       {/* Ranking Final da Partida (visível quando finalRanking está preenchido) */}
       {finalRanking && (
-        <div className="w-full max-h-[500px] overflow-auto bg-white p-6 rounded-xl shadow-lg mt-8">
-          <h3 className="text-3xl font-bold mb-6 text-center text-blue-800">
+        <div className="w-full max-h-[500px] overflow-auto bg-white p-6 rounded-xl shadow-lg mt-8 dark:bg-gray-800"> {/* Added dark class */}
+          <h3 className="text-3xl font-bold mb-6 text-center text-blue-800 dark:text-blue-400"> {/* Added dark class */}
             🏆 Ranking Final da Partida 🏆
           </h3>
           <ol className="list-decimal list-inside space-y-3 text-xl">
@@ -346,8 +344,8 @@ export default function GameBoard({
                 key={player.nickname}
                 className={`p-4 rounded-lg flex justify-between items-center ${
                   idx === 0
-                    ? "bg-yellow-400 text-gray-900 font-extrabold shadow-lg transform scale-105"
-                    : "bg-gray-100 text-gray-800"
+                    ? "bg-yellow-400 text-gray-900 font-extrabold shadow-lg transform scale-105 dark:bg-yellow-600 dark:text-gray-900" // Added dark classes for highlight
+                    : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100" // Added dark classes for others
                 } transition-all duration-300`}
               >
                 <span>
@@ -376,20 +374,20 @@ export default function GameBoard({
       {/* Modal de Validação (visível durante o processo de validação) */}
       {showModal && validationData && !finalRanking && (
         <Modal onClose={() => {}} showClose={false}>
-          <div className="space-y-6">
-            <h4 className="text-2xl font-bold text-center text-blue-700">
+          <div className="space-y-6 bg-white p-6 rounded-xl shadow-lg dark:bg-gray-800 dark:text-gray-100"> {/* Added dark classes for Modal content */}
+            <h4 className="text-2xl font-bold text-center text-blue-700 dark:text-blue-400"> {/* Added dark class */}
               Validando Resposta
             </h4>
-            <div className="text-xl font-semibold text-center text-gray-800">
+            <div className="text-xl font-semibold text-center text-gray-800 dark:text-gray-100"> {/* Added dark class */}
               Jogador: {validationData.playerNickname}
             </div>
-            <div className="text-xl font-semibold text-center text-gray-800">
+            <div className="text-xl font-semibold text-center text-gray-800 dark:text-gray-100"> {/* Added dark class */}
               Tema: {validationData.theme}
             </div>
 
             {(revealed || currentAnswerValidatedInModal) ? (
               <>
-                <div className="text-center text-2xl text-gray-900 font-bold">
+                <div className="text-center text-2xl text-gray-900 font-bold dark:text-gray-50"> {/* Added dark class */}
                   Resposta:{" "}
                   <span className="text-blue-600">{validationData.answer || "(Resposta vazia)"}</span>
                 </div>
@@ -461,7 +459,7 @@ export default function GameBoard({
                     Mostrar Resposta
                   </button>
                 ) : (
-                  <p className="text-center text-lg text-gray-500 italic">
+                  <p className="text-center text-lg text-gray-500 italic dark:text-gray-400"> {/* Added dark class */}
                     Aguardando o juiz revelar a resposta...
                   </p>
                 )}

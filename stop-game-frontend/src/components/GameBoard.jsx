@@ -10,8 +10,13 @@ export default function GameBoard({
   letter,
   isAdmin,
   userId,
-  roomThemes, // Esta prop é crucial e deve vir do Room.jsx
-  setRoomThemes, // <--- NOVA PROP: Passada do Room.jsx para atualizar os temas no App.jsx
+  roomThemes,
+  setRoomThemes,
+  // roomDuration, // Não usado diretamente aqui
+  setRoomDuration, // <--- Prop adicionada para o GameBoard? Se não for usada, pode remover.
+  // Se for usada para exibir a duração na modal de temas, é ok.
+  stopClickedByMe, // <--- Esta prop agora é essencial aqui!
+  handleStopRound, // <--- Esta prop agora é essencial aqui!
 }) {
   const maxThemes = 10;
   const [answers, setAnswers] = useState([]);
@@ -25,16 +30,17 @@ export default function GameBoard({
   const [validationData, setValidationData] = useState(null);
   const [canReveal, setCanReveal] = useState(false);
   const [revealed, setRevealed] = useState(false);
-  // NOVO ESTADO: Controla se a resposta atual da modal já foi validada
   const [currentAnswerValidatedInModal, setCurrentAnswerValidatedInModal] = useState(false);
 
   const [playerOverallScore, setPlayerOverallScore] = useState(0);
 
+  // Ref para as respostas atuais para serem usadas em callbacks do socket
   const answersRef = useRef(answers);
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
 
+  // Efeito para inicializar/atualizar as respostas com base nos temas da sala
   useEffect(() => {
     const themesChanged =
       JSON.stringify(roomThemes) !== JSON.stringify(answers.map((a) => a.theme));
@@ -60,8 +66,9 @@ export default function GameBoard({
       );
       setAnswers([{ theme: "", answer: "", points: null, validated: false }]);
     }
-  }, [roomThemes, isAdmin, roundStarted, roundEnded, answers.length]); // Adicionado answers.length como dependência
+  }, [roomThemes, isAdmin, roundStarted, roundEnded, answers.length]);
 
+  // Efeito para resetar a rodada (quando o admin clica em 'Nova Rodada')
   useEffect(() => {
     if (resetRoundFlag) {
       console.log(
@@ -82,12 +89,13 @@ export default function GameBoard({
       setValidationData(null);
       setCanReveal(false);
       setRevealed(false);
-      setCurrentAnswerValidatedInModal(false); // Resetar este estado também
+      setCurrentAnswerValidatedInModal(false);
       setPlayerOverallScore(0);
       onResetRound();
     }
   }, [resetRoundFlag, onResetRound, roomThemes]);
 
+  // Event Listeners para Socket.IO
   useEffect(() => {
     const handleRoundEnded = () => {
       console.log("🔔 Evento round_ended recebido — enviando respostas...");
@@ -108,19 +116,17 @@ export default function GameBoard({
       setShowModal(true);
       setValidationData(current);
       setCanReveal(socket.id === judgeId);
-      setRevealed(false); // Garante que a resposta não esteja revelada ao iniciar
-      setCurrentAnswerValidatedInModal(false); // Garante que a resposta não esteja validada ao iniciar
+      setRevealed(false);
+      setCurrentAnswerValidatedInModal(false);
       setShowResults(false);
       setTotalPoints(null);
     };
 
     const handleRevealAnswer = () => {
-        setRevealed(true);
-        // Quando a resposta é revelada, se ela JÁ VIER validada do backend (cenário improvável mas possível),
-        // já marcamos como validada na modal.
-        if (validationData?.validated) {
-            setCurrentAnswerValidatedInModal(true);
-        }
+      setRevealed(true);
+      if (validationData?.validated) {
+        setCurrentAnswerValidatedInModal(true);
+      }
     };
 
     const handleAnswerValidated = ({ current }) => {
@@ -130,12 +136,8 @@ export default function GameBoard({
           i === current.themeIndex ? { ...a, points: current.points, validated: current.validated } : a
         )
       );
-      // Atualiza validationData para renderizar os pontos na modal
       setValidationData(current);
-      // NOVO: Marca que a resposta atual na modal foi validada
       setCurrentAnswerValidatedInModal(true);
-      // NÃO resetamos 'revealed' aqui, para que a resposta e os pontos continuem visíveis.
-      // A próxima chamada de 'start_validation' ou 'next_validation' irá resetar 'revealed' para a próxima resposta.
     };
 
     const handleAllAnswersValidated = (allPlayersRoundScores) => {
@@ -150,7 +152,7 @@ export default function GameBoard({
 
       setShowModal(false);
       setValidationData(null);
-      setCurrentAnswerValidatedInModal(false); // Resetar este estado ao fechar a modal
+      setCurrentAnswerValidatedInModal(false);
       setShowResults(true);
     };
 
@@ -169,14 +171,16 @@ export default function GameBoard({
       socket.off("answer_validated", handleAnswerValidated);
       socket.off("all_answers_validated", handleAllAnswersValidated);
     };
-  }, [userId, roundStarted, answers, validationData]); // Adicionei validationData como dependência para handleRevealAnswer
+  }, [userId, roundStarted, answers, validationData]);
 
+  // Handler para mudança de resposta em um campo
   const handleAnswerInputChange = (index, value) => {
     const newAnswers = [...answers];
     newAnswers[index].answer = value;
     setAnswers(newAnswers);
   };
 
+  // Handler para adicionar um novo tema
   const handleAddTheme = () => {
     const trimmedTheme = newThemeInput.trim();
     if (trimmedTheme && !roomThemes.includes(trimmedTheme) && roomThemes.length < maxThemes) {
@@ -186,6 +190,7 @@ export default function GameBoard({
     }
   };
 
+  // Handler para remover um tema existente
   const handleRemoveTheme = (themeToRemove) => {
     if (roomThemes.length > 1) {
       const updatedThemes = roomThemes.filter((theme) => theme !== themeToRemove);
@@ -206,14 +211,14 @@ export default function GameBoard({
 
   return (
     <div className="w-full h-full flex flex-col space-y-6">
-      {/* ... (restante do seu código JSX, que não precisa de alterações) ... */}
-
+      {/* Letra da Rodada (visível apenas quando a rodada está ativa) */}
       {letter && roundStarted && !roundEnded && (
         <div className="text-center text-3xl font-bold mb-4 text-blue-700 select-none">
           Letra da rodada: <span className="text-5xl">{letter}</span>
         </div>
       )}
 
+      {/* Seção de gerenciamento de temas (apenas para Admin e fora da rodada) */}
       {isAdmin && !roundStarted && !roundEnded && !finalRanking && (
         <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
           <h3 className="text-xl font-semibold mb-3 text-gray-700">Gerenciar Temas</h3>
@@ -255,6 +260,7 @@ export default function GameBoard({
         </div>
       )}
 
+      {/* Campos de Resposta (visível se não houver ranking final) */}
       {!finalRanking && (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 max-h-[450px] overflow-y-auto">
@@ -284,6 +290,8 @@ export default function GameBoard({
             ))}
           </div>
 
+          {/* Botão de Submeter Respostas (visível apenas durante a rodada ativa) */}
+          {/* Este botão já estava aqui, mantido para submeter ao final do tempo */}
           {roundStarted && !roundEnded && (
             <div className="flex justify-center mt-4">
               <button
@@ -295,6 +303,24 @@ export default function GameBoard({
             </div>
           )}
 
+          {/* NOVO: Botão STOP ao final dos temas para facilitar o acesso em mobile */}
+          {roundStarted && !roundEnded && !stopClickedByMe && (
+            <div className="flex justify-center mt-4">
+              <button
+                onClick={handleStopRound} // Mesma função do outro botão STOP
+                className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg shadow-md mt-4 transition-colors duration-200 font-semibold"
+              >
+                STOP
+              </button>
+            </div>
+          )}
+          {roundStarted && !roundEnded && stopClickedByMe && (
+            <div className="text-red-600 font-semibold mt-4 text-lg text-center">
+              Você clicou em STOP! Aguardando outros jogadores...
+            </div>
+          )}
+
+          {/* Resultados da Rodada (visível após a validação) */}
           {showResults && totalPoints !== null && (
             <div className="text-center mt-4">
               <div className="text-2xl font-bold text-purple-700">
@@ -322,6 +348,7 @@ export default function GameBoard({
         </>
       )}
 
+      {/* Ranking Final da Partida (visível quando finalRanking está preenchido) */}
       {finalRanking && (
         <div className="w-full max-h-[500px] overflow-auto bg-white p-6 rounded-xl shadow-lg mt-8">
           <h3 className="text-3xl font-bold mb-6 text-center text-blue-800">
@@ -374,7 +401,6 @@ export default function GameBoard({
               Tema: {validationData.theme}
             </div>
 
-            {/* Condição para exibir a resposta e os botões */}
             {(revealed || currentAnswerValidatedInModal) ? (
               <>
                 <div className="text-center text-2xl text-gray-900 font-bold">
@@ -382,7 +408,6 @@ export default function GameBoard({
                   <span className="text-blue-600">{validationData.answer || "(Resposta vazia)"}</span>
                 </div>
 
-                {/* Exibe os pontos APENAS se a resposta já foi validada */}
                 {validationData.validated && validationData.points !== null && (
                   <div className="text-center text-xl font-bold mt-4">
                     Pontos:{" "}
@@ -396,7 +421,6 @@ export default function GameBoard({
                   </div>
                 )}
 
-                {/* Botões Validar/Anular visíveis SOMENTE se não foi validada E for o juiz */}
                 {canReveal && !validationData.validated && (
                   <div className="flex justify-center space-x-4 mt-6">
                     <button
@@ -414,7 +438,6 @@ export default function GameBoard({
                   </div>
                 )}
 
-                {/* Botão Próxima Resposta/Tema/Finalizar visível SOMENTE se foi validada E for o juiz */}
                 {canReveal && validationData.validated && (
                   <div className="flex justify-center mt-6">
                     {validationData.isLastAnswerOfGame ? (
@@ -443,7 +466,6 @@ export default function GameBoard({
                 )}
               </>
             ) : (
-              // Se não foi revelado nem validado ainda (estado inicial)
               <div className="flex justify-center mt-6">
                 {canReveal ? (
                   <button

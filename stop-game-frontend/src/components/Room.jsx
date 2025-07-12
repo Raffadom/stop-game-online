@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react"; // <--- Importe useEffect
+import React, { useState, useEffect } from "react";
 import GameBoard from "./GameBoard";
 import Timer from "./Timer";
-import { SunIcon, MoonIcon } from '@heroicons/react/24/solid'; // <--- Importe os ícones (veja nota abaixo)
+import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
 
 export default function Room({
   nickname,
@@ -64,7 +64,7 @@ export default function Room({
   };
 
   return (
-    <div className="flex flex-col min-h-screen max-w-5xl mx-auto px-4 py-6 space-y-8 relative"> {/* Adicione 'relative' aqui */}
+    <div className="flex flex-col min-h-screen max-w-5xl mx-auto px-4 py-6 space-y-8 relative">
       {/* Botão de Tema no canto superior direito */}
       <button
         onClick={toggleTheme}
@@ -72,19 +72,19 @@ export default function Room({
         title={theme === 'light' ? 'Mudar para Tema Escuro' : 'Mudar para Tema Claro'}
       >
         {theme === 'light' ? (
-          <MoonIcon className="h-6 w-6" /> // Ícone de lua para tema claro
+          <MoonIcon className="h-4 w-4" /> 
         ) : (
-          <SunIcon className="h-6 w-6" /> // Ícone de sol para tema escuro
+          <SunIcon className="h-4 w-4" /> 
         )}
       </button>
 
       {/* Informações da Sala */}
-      <div className="bg-white p-6 rounded-xl shadow w-full flex flex-col space-y-2 dark:bg-gray-800 dark:text-gray-100"> {/* Adicione classes dark */}
-        <div className="text-lg font-semibold text-gray-700 dark:text-gray-300"> {/* Adicione classes dark */}
+      <div className="bg-white p-6 rounded-xl shadow w-full flex flex-col space-y-2 dark:bg-gray-800 dark:text-gray-100">
+        <div className="text-lg font-semibold text-gray-700 dark:text-gray-300">
           Sala: <span className="font-bold text-blue-600">{room}</span>
           <button
             onClick={handleShareRoomLink}
-            className="ml-4 px-3 py-1 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300 transition-colors dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600" // Adicione classes dark
+            className="ml-4 px-3 py-1 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300 transition-colors dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
             title="Copiar link da sala"
           >
             🔗 Compartilhar
@@ -95,7 +95,7 @@ export default function Room({
             </span>
           )}
         </div>
-        <div className="text-lg font-semibold text-gray-700 dark:text-gray-300"> {/* Adicione classes dark */}
+        <div className="text-lg font-semibold text-gray-700 dark:text-gray-300">
           Jogadores:{" "}
           <span className="font-bold">
             {playersInRoom.map((p) => p.nickname).join(", ")}
@@ -109,7 +109,7 @@ export default function Room({
         )}
         {/* Exibe a letra somente quando a rodada está ativa */}
         {letter && roundStarted && !roundEnded && (
-          <div className="text-lg font-semibold mt-2 text-gray-700 text-center dark:text-gray-300"> {/* Adicione classes dark */}
+          <div className="text-lg font-semibold mt-2 text-gray-700 text-center dark:text-gray-300">
             A letra é:{" "}
             <span className="text-3xl font-extrabold text-blue-700">
               {letter}
@@ -119,17 +119,17 @@ export default function Room({
       </div>
 
       {/* Controles da Rodada */}
-      <div className="bg-white p-6 rounded-xl shadow w-full flex flex-col items-center space-y-4 dark:bg-gray-800 dark:text-gray-100"> {/* Adicione classes dark */}
+      <div className="bg-white p-6 rounded-xl shadow w-full flex flex-col items-center space-y-4 dark:bg-gray-800 dark:text-gray-100">
         {isAdmin && !roundStarted && !roundEnded && countdown === null && (
           <div className="flex flex-col sm:flex-row items-center gap-4">
             <div className="flex items-center gap-2">
-              <label htmlFor="duration-input" className="text-gray-700 font-medium dark:text-gray-300">Duração (segundos):</label> {/* Adicione classes dark */}
+              <label htmlFor="duration-input" className="text-gray-700 font-medium dark:text-gray-300">Duração (segundos):</label>
               <input
                 id="duration-input"
                 type="number"
                 value={roomDuration}
                 onChange={(e) => setRoomDuration(Number(e.target.value))}
-                className="w-24 border border-gray-300 p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-400 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" // Adicione classes dark
+                className="w-24 border border-gray-300 p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-400 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
                 min={10}
                 max={300}
               />
@@ -142,7 +142,7 @@ export default function Room({
             </button>
           </div>
         )}
-        
+
         {/* Timer da rodada ativa */}
         {roundStarted && countdown === null && (
           <>
@@ -165,7 +165,7 @@ export default function Room({
       </div>
 
       {/* Componente GameBoard */}
-      <div className="bg-white p-6 rounded-xl shadow w-full flex-grow dark:bg-gray-800"> {/* Adicione classes dark */}
+      <div className="bg-white p-6 rounded-xl shadow w-full flex-grow dark:bg-gray-800">
         <GameBoard
           roundStarted={roundStarted}
           roundEnded={roundEnded}

@@ -22,7 +22,7 @@ const server = http.createServer(app);
 // Exemplo: "https://seu-jogo-legal.netlify.app"
 const io = new Server(server, {
   cors: {
-    origin: "https://stop-game-frontend.netlify.app", // <--- MUITO IMPORTANTE: MUDAR AQUI!
+    origin: "https://stop-paper.netlify.app", // <--- MUITO IMPORTANTE: MUDAR AQUI!
     methods: ["GET", "POST"]
   }
 });

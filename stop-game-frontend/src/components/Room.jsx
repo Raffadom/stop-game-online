@@ -26,14 +26,11 @@ export default function Room({
 }) {
   const [showCopiedMessage, setShowCopiedMessage] = useState(false);
 
-  // NOVO ESTADO: Para controlar o tema (light ou dark)
   const [theme, setTheme] = useState(() => {
-    // Inicializa o tema a partir do localStorage ou 'light' por padrão
     const savedTheme = localStorage.getItem('theme');
     return savedTheme ? savedTheme : 'light';
   });
 
-  // EFEITO: Aplica a classe 'dark' ao <html> e salva no localStorage
   useEffect(() => {
     const root = window.document.documentElement;
     if (theme === 'dark') {
@@ -42,9 +39,8 @@ export default function Room({
       root.classList.remove('dark');
     }
     localStorage.setItem('theme', theme);
-  }, [theme]); // Roda sempre que o tema muda
+  }, [theme]);
 
-  // FUNÇÃO: Alterna o tema
   const toggleTheme = () => {
     setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
   };
@@ -72,9 +68,9 @@ export default function Room({
         title={theme === 'light' ? 'Mudar para Tema Escuro' : 'Mudar para Tema Claro'}
       >
         {theme === 'light' ? (
-          <MoonIcon className="h-4 w-4" /> 
+          <MoonIcon className="h-4 w-4" />
         ) : (
-          <SunIcon className="h-4 w-4" /> 
+          <SunIcon className="h-4 w-4" />
         )}
       </button>
 
@@ -97,9 +93,23 @@ export default function Room({
         </div>
         <div className="text-lg font-semibold text-gray-700 dark:text-gray-300">
           Jogadores:{" "}
-          <span className="font-bold">
-            {playersInRoom.map((p) => p.nickname).join(", ")}
-          </span>
+          <div className="inline-flex flex-wrap gap-2 ml-2"> {/* Alterado para div com flex-wrap */}
+            {playersInRoom.map((player) => (
+              <span
+                key={player.userId} // Use userId como key, é mais estável
+                className={`
+                  px-3 py-1 rounded-full text-sm font-medium
+                  ${player.userId === userId // Se for o jogador atual
+                    ? 'bg-blue-200 text-blue-800 dark:bg-blue-700 dark:text-blue-100' // Estilo para o próprio jogador
+                    : 'bg-green-200 text-green-800 dark:bg-green-700 dark:text-green-100' // Estilo para outros jogadores
+                  }
+                  ${player.isCreator ? 'border-2 border-yellow-500 dark:border-yellow-400' : ''} {/* Borda para o admin */}
+                `}
+              >
+                {player.nickname} {player.isCreator && '(Admin)'} {/* Adiciona "(Admin)" se for o criador */}
+              </span>
+            ))}
+          </div>
         </div>
         {/* Contagem Regressiva para iniciar a rodada */}
         {countdown !== null && countdown > 0 && (

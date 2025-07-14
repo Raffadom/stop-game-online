@@ -5,8 +5,21 @@ const { Server } = require("socket.io");
 
 const app = express();
 
+// --- Configuração das origens permitidas (CORS) ---
+// Para desenvolvimento local: 'http://localhost:5173'
+// Para produção (Netlify): 'https://stop-paper.netlify.app'
+// Você pode adicionar mais origens se necessário.
+
+// Obtém a origem permitida do ambiente ou usa um valor padrão para desenvolvimento
+const allowedOrigins = process.env.NODE_ENV === 'production'
+  ? ['https://stop-paper.netlify.app'] // Em produção, apenas o Netlify
+  : ['http://localhost:5173', 'https://stop-paper.netlify.app']; // Em desenvolvimento, ambos
+
 // Middleware CORS para Express (útil se você tiver outras rotas HTTP/REST)
-app.use(cors());
+app.use(cors({
+  origin: allowedOrigins,
+  methods: ["GET", "POST"]
+}));
 
 // --- Rota de Teste para a Raiz (/) ---
 // Isso evita o erro 404 Not Found quando o navegador acessa a URL base do seu backend.
@@ -18,11 +31,10 @@ app.get('/', (req, res) => {
 const server = http.createServer(app);
 
 // --- Configuração do Socket.IO com CORS específico ---
-// Substitua "https://SEU_DOMINIO_NETLIFY.netlify.app" pela URL EXATA do seu frontend no Netlify.
-// Exemplo: "https://seu-jogo-legal.netlify.app"
+// Agora, a origem será dinâmica baseada no ambiente ou incluirá localhost para desenvolvimento.
 const io = new Server(server, {
   cors: {
-    origin: "https://stop-paper.netlify.app", // <--- MUITO IMPORTANTE: MUDAR AQUI!
+    origin: allowedOrigins, // <-- AGORA INCLUI LOCALHOST E NETLIFY
     methods: ["GET", "POST"]
   }
 });
@@ -88,7 +100,7 @@ io.on("connection", (socket) => {
 
     io.to(room).emit("players_update", playersInRoom);
     io.to(room).emit("room_config", roomConfigs[room]);
-    
+
     socket.emit("room_joined", {
       room: room,
       players: playersInRoom,
@@ -102,8 +114,8 @@ io.on("connection", (socket) => {
   socket.on("update_config", ({ room, duration, themes }) => {
     const userId = socket.userId;
     if (!room) {
-        console.warn(`[Socket.io] update_config: Sala indefinida para ${userId}.`);
-        return;
+      console.warn(`[Socket.io] update_config: Sala indefinida para ${userId}.`);
+      return;
     }
     const config = roomConfigs[room];
     if (config && config.creatorId === userId) {
@@ -112,7 +124,7 @@ io.on("connection", (socket) => {
       io.to(room).emit("room_config", config);
       console.log(`[Socket.io] Configuração da sala ${room} atualizada por ${userId}.`);
     } else {
-        console.warn(`[Socket.io] update_config: ${userId} não é o criador ou sala ${room} não encontrada.`);
+      console.warn(`[Socket.io] update_config: ${userId} não é o criador ou sala ${room} não encontrada.`);
     }
   });
 
@@ -180,8 +192,8 @@ io.on("connection", (socket) => {
   socket.on("stop_round", () => {
     const room = socket.room;
     if (!room) {
-        console.warn(`[Socket.io] stop_round: Sala indefinida para ${socket.userId}.`);
-        return;
+      console.warn(`[Socket.io] stop_round: Sala indefinida para ${socket.userId}.`);
+      return;
     }
     const config = roomConfigs[room];
 
@@ -205,8 +217,8 @@ io.on("connection", (socket) => {
     const userId = socket.userId;
     const room = socket.room;
     if (!room) {
-        console.warn(`[Socket.io] submit_answers: Sala indefinida para ${userId}.`);
-        return;
+      console.warn(`[Socket.io] submit_answers: Sala indefinida para ${userId}.`);
+      return;
     }
     const nickname = players[userId]?.nickname;
     const config = roomConfigs[room];
@@ -386,14 +398,14 @@ io.on("connection", (socket) => {
     const room = socket.room;
 
     if (!userId || !room) {
-        console.log(`[Socket.io] Desconexão de socket não identificado (userId: ${userId}, room: ${room}).`);
-        return;
+      console.log(`[Socket.io] Desconexão de socket não identificado (userId: ${userId}, room: ${room}).`);
+      return;
     }
 
     if (players[userId]) {
-        delete players[userId];
+      delete players[userId];
     } else {
-        console.warn(`[Socket.io] Jogador ${userId} desconectado da sala ${room}, mas não encontrado no registro global de players.`);
+      console.warn(`[Socket.io] Jogador ${userId} desconectado da sala ${room}, mas não encontrado no registro global de players.`);
     }
 
     const playersInRoom = Object.values(players).filter((p) => p.room === room);
@@ -414,18 +426,18 @@ io.on("connection", (socket) => {
       delete roomConfigs[room];
       delete roomOverallScores[room];
     } else {
-        const currentCreatorId = roomConfigs[room]?.creatorId;
-        if (currentCreatorId === userId && playersInRoom.length > 0) {
-            const newCreator = playersInRoom[0];
-            roomConfigs[room].creatorId = newCreator.userId;
-            players[newCreator.userId].isCreator = true;
-            console.log(`[Socket.io] Novo criador da sala ${room} é ${newCreator.nickname} (${newCreator.userId}).`);
-            
-            io.to(room).emit("players_update", playersInRoom.map(p => ({
-                id: p.id, nickname: p.nickname, userId: p.userId, isCreator: p.userId === newCreator.userId
-            })));
-            io.to(room).emit("room_config", roomConfigs[room]);
-        }
+      const currentCreatorId = roomConfigs[room]?.creatorId;
+      if (currentCreatorId === userId && playersInRoom.length > 0) {
+        const newCreator = playersInRoom[0];
+        roomConfigs[room].creatorId = newCreator.userId;
+        players[newCreator.userId].isCreator = true;
+        console.log(`[Socket.io] Novo criador da sala ${room} é ${newCreator.nickname} (${newCreator.userId}).`);
+
+        io.to(room).emit("players_update", playersInRoom.map(p => ({
+          id: p.id, nickname: p.nickname, userId: p.userId, isCreator: p.userId === newCreator.userId
+        })));
+        io.to(room).emit("room_config", roomConfigs[room]);
+      }
     }
   });
 });
@@ -483,7 +495,7 @@ function initiateValidationProcess(room) {
   }
 
   const initialValidatorId = stopCallers[room] || roomsAnswers[room][0].id;
-  
+
   validationStates[room] = {
     currentPlayerIndex: 0,
     currentThemeIndex: 0,
@@ -516,8 +528,8 @@ function initiateValidationProcess(room) {
 
 function initiateValidationAfterDelay(room) {
   if (!room) {
-      console.warn(`[Socket.io] initiateValidationAfterDelay: Sala indefinida. Não pode agendar validação.`);
-      return;
+    console.warn(`[Socket.io] initiateValidationAfterDelay: Sala indefinida. Não pode agendar validação.`);
+    return;
   }
   const submissionGracePeriodMs = 1500;
   console.log(`[Socket.io] Aguardando ${submissionGracePeriodMs}ms antes de iniciar a validação na sala ${room}...`);

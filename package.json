@@ -1,0 +1,23 @@
+{
+  "name": "stop-game-online",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Raffadom/stop-game-online.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Raffadom/stop-game-online/issues"
+  },
+  "homepage": "https://github.com/Raffadom/stop-game-online#readme",
+  "description": "",
+  "devDependencies": {
+    "cypress": "^14.5.2"
+  }
+}

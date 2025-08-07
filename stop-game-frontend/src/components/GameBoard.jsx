@@ -28,7 +28,8 @@ export default function GameBoard({
   const [validationData, setValidationData] = useState(null);
   const [canReveal, setCanReveal] = useState(false);
   const [revealed, setRevealed] = useState(false);
-  const [currentAnswerValidatedInModal, setCurrentAnswerValidatedInModal] = useState(false);
+  const [currentAnswerValidatedInModal, setCurrentAnswerValidatedInModal] =
+    useState(false);
 
   const [playerOverallScore, setPlayerOverallScore] = useState(0);
 
@@ -39,29 +40,33 @@ export default function GameBoard({
   }, [answers]);
 
   // Efeito para inicializar/atualizar as respostas com base nos temas da sala
-  useEffect(() => {
+useEffect(() => {
     const themesChanged =
       JSON.stringify(roomThemes) !== JSON.stringify(answers.map((a) => a.theme));
 
-    if (roomThemes && roomThemes.length > 0 && (themesChanged || answers.length === 0)) {
-      console.log("GameBoard: Inicializando/Atualizando respostas com temas da sala:", roomThemes);
-      setAnswers(
-        roomThemes.map((theme) => ({
-          theme: theme,
-          answer: "",
-          points: null,
-          validated: false,
-        }))
-      );
+    if (roomThemes && roomThemes.length > 0) {
+      if (themesChanged || answers.length === 0) {
+        console.log("GameBoard: Inicializando/Atualizando respostas com temas da sala:", roomThemes);
+        setAnswers(
+          roomThemes.map((theme) => ({
+            theme: theme,
+            answer: "",
+            points: null,
+            validated: false,
+          }))
+        );
+      }
+    } else if (roomThemes && roomThemes.length === 0) {
+      // NOVA LÓGICA: Se não houver temas, limpe as respostas
+      console.log("GameBoard: Nenhum tema restante. Limpando campos de resposta.");
+      setAnswers([]);
     } else if (
       !isAdmin &&
       !roundStarted &&
       !roundEnded &&
       answers.length === 0
     ) {
-      console.log(
-        "GameBoard: Inicializando com um campo vazio para jogador não-admin, aguardando temas."
-      );
+      console.log("GameBoard: Inicializando com um campo vazio para jogador não-admin, aguardando temas.");
       setAnswers([{ theme: "", answer: "", points: null, validated: false }]);
     }
   }, [roomThemes, isAdmin, roundStarted, roundEnded, answers.length]);
@@ -110,7 +115,12 @@ export default function GameBoard({
     };
 
     const handleStartValidation = ({ current, judgeId }) => {
-      console.log("📨 start_validation recebido:", current, " | Juiz Socket ID:", judgeId);
+      console.log(
+        "📨 start_validation recebido:",
+        current,
+        " | Juiz Socket ID:",
+        judgeId
+      );
       setShowModal(true);
       setValidationData(current);
       setCanReveal(socket.id === judgeId);
@@ -131,7 +141,9 @@ export default function GameBoard({
       console.log("✅ answer_validated recebido:", current);
       setAnswers((prevAnswers) =>
         prevAnswers.map((a, i) =>
-          i === current.themeIndex ? { ...a, points: current.points, validated: current.validated } : a
+          i === current.themeIndex
+            ? { ...a, points: current.points, validated: current.validated }
+            : a
         )
       );
       setValidationData(current);
@@ -190,10 +202,8 @@ export default function GameBoard({
 
   // Handler para remover um tema existente
   const handleRemoveTheme = (themeToRemove) => {
-    if (roomThemes.length > 1) {
-      const updatedThemes = roomThemes.filter((theme) => theme !== themeToRemove);
-      setRoomThemes(updatedThemes);
-    }
+    const updatedThemes = roomThemes.filter((theme) => theme !== themeToRemove);
+    setRoomThemes(updatedThemes);
   };
 
   const handleNewRound = () => {
@@ -205,21 +215,43 @@ export default function GameBoard({
   const handleValidation = (isValid) => socket.emit("validate_answer", { valid: isValid });
   const handleNext = () => socket.emit("next_validation");
 
-  console.log("GameBoard Render: ", { isAdmin, roundStarted, roundEnded, answersLength: answers.length, showModal, validationData, showResults, finalRanking, roomThemes, revealed, currentAnswerValidatedInModal });
+  console.log(
+    "GameBoard Render: ",
+    {
+      isAdmin,
+      roundStarted,
+      roundEnded,
+      answersLength: answers.length,
+      showModal,
+      validationData,
+      showResults,
+      finalRanking,
+      roomThemes,
+      revealed,
+      currentAnswerValidatedInModal,
+    }
+  );
 
   return (
     <div className="w-full h-full flex flex-col space-y-6">
       {/* Letra da Rodada (visível apenas quando a rodada está ativa) */}
       {letter && roundStarted && !roundEnded && (
-        <div className="text-center text-3xl font-bold mb-4 text-blue-700 select-none dark:text-blue-400"> {/* Added dark class */}
+        <div className="text-center text-3xl font-bold mb-4 text-blue-700 select-none dark:text-blue-400">
+          {" "}
+          {/* Added dark class */}
           Letra da rodada: <span className="text-5xl">{letter}</span>
         </div>
       )}
 
       {/* Seção de gerenciamento de temas (apenas para Admin e fora da rodada) */}
       {isAdmin && !roundStarted && !roundEnded && !finalRanking && (
-        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 dark:bg-gray-700 dark:border-gray-600"> {/* Added dark classes */}
-          <h3 className="text-xl font-semibold mb-3 text-gray-700 dark:text-gray-100">Gerenciar Temas</h3> {/* Added dark class */}
+        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 dark:bg-gray-700 dark:border-gray-600">
+          {" "}
+          {/* Added dark classes */}
+          <h3 className="text-xl font-semibold mb-3 text-gray-700 dark:text-gray-100">
+            Gerenciar Temas
+          </h3>{" "}
+          {/* Added dark class */}
           <div className="flex flex-col sm:flex-row gap-2 mb-3">
             <input
               type="text"
@@ -243,15 +275,13 @@ export default function GameBoard({
                 className="flex items-center bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium dark:bg-blue-800 dark:text-blue-100" // Added dark classes
               >
                 {theme}
-                {roomThemes.length > 1 && (
-                  <button
-                    onClick={() => handleRemoveTheme(theme)}
-                    className="ml-2 text-blue-600 hover:text-blue-900 focus:outline-none dark:text-blue-300 dark:hover:text-blue-100" // Added dark classes
-                    title="Remover tema"
-                  >
-                    &times;
-                  </button>
-                )}
+                <button
+                  onClick={() => handleRemoveTheme(theme)}
+                  className="ml-2 text-blue-600 hover:text-blue-900 focus:outline-none dark:text-blue-300 dark:hover:text-blue-100" // Added dark classes
+                  title="Remover tema"
+                >
+                  &times;
+                </button>
               </span>
             ))}
           </div>
@@ -267,7 +297,12 @@ export default function GameBoard({
                 key={answerItem.theme + i}
                 className="flex flex-col bg-gray-50 p-4 rounded shadow-sm min-w-[200px] dark:bg-gray-700" // Added dark class
               >
-                <label className="block text-gray-700 font-medium mb-1 truncate dark:text-gray-100" title={answerItem.theme}> {/* Added dark class */}
+                <label
+                  className="block text-gray-700 font-medium mb-1 truncate dark:text-gray-100"
+                  title={answerItem.theme}
+                >
+                  {" "}
+                  {/* Added dark class */}
                   {answerItem.theme}
                 </label>
                 <input
@@ -279,8 +314,12 @@ export default function GameBoard({
                   className="mb-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-400 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-50" // Added dark classes
                 />
                 {showResults && answerItem.points !== null && (
-                  <div className="text-sm text-right font-semibold"
-                        style={{ color: answerItem.points > 0 ? '#10B981' : '#EF4444' }}>
+                  <div
+                    className="text-sm text-right font-semibold"
+                    style={{
+                      color: answerItem.points > 0 ? "#10B981" : "#EF4444",
+                    }}
+                  >
                     Pontos: {answerItem.points}
                   </div>
                 )}
@@ -299,7 +338,9 @@ export default function GameBoard({
             </div>
           )}
           {roundStarted && !roundEnded && stopClickedByMe && (
-            <div className="text-red-600 font-semibold mt-4 text-lg text-center dark:text-red-400"> {/* Added dark class */}
+            <div className="text-red-600 font-semibold mt-4 text-lg text-center dark:text-red-400">
+              {" "}
+              {/* Added dark class */}
               Você clicou em STOP! Aguardando outros jogadores...
             </div>
           )}
@@ -307,10 +348,14 @@ export default function GameBoard({
           {/* Resultados da Rodada (visível após a validação) */}
           {showResults && totalPoints !== null && (
             <div className="text-center mt-4">
-              <div className="text-2xl font-bold text-purple-700 dark:text-purple-400"> {/* Added dark class */}
+              <div className="text-2xl font-bold text-purple-700 dark:text-purple-400">
+                {" "}
+                {/* Added dark class */}
                 Total da Rodada: {totalPoints} pontos
               </div>
-              <div className="text-xl font-bold text-gray-800 mt-2 dark:text-gray-100"> {/* Added dark class */}
+              <div className="text-xl font-bold text-gray-800 mt-2 dark:text-gray-100">
+                {" "}
+                {/* Added dark class */}
                 Total da Partida: {playerOverallScore} pontos
               </div>
               <div className="flex justify-center space-x-6 mt-4">
@@ -334,8 +379,12 @@ export default function GameBoard({
 
       {/* Ranking Final da Partida (visível quando finalRanking está preenchido) */}
       {finalRanking && (
-        <div className="w-full max-h-[500px] overflow-auto bg-white p-6 rounded-xl shadow-lg mt-8 dark:bg-gray-800"> {/* Added dark class */}
-          <h3 className="text-3xl font-bold mb-6 text-center text-blue-800 dark:text-blue-400"> {/* Added dark class */}
+        <div className="w-full max-h-[500px] overflow-auto bg-white p-6 rounded-xl shadow-lg mt-8 dark:bg-gray-800">
+          {" "}
+          {/* Added dark class */}
+          <h3 className="text-3xl font-bold mb-6 text-center text-blue-800 dark:text-blue-400">
+            {" "}
+            {/* Added dark class */}
             🏆 Ranking Final da Partida 🏆
           </h3>
           <ol className="list-decimal list-inside space-y-3 text-xl">
@@ -374,22 +423,34 @@ export default function GameBoard({
       {/* Modal de Validação (visível durante o processo de validação) */}
       {showModal && validationData && !finalRanking && (
         <Modal onClose={() => {}} showClose={false}>
-          <div className="space-y-6 bg-white p-6 rounded-xl shadow-lg dark:bg-gray-800 dark:text-gray-100"> {/* Added dark classes for Modal content */}
-            <h4 className="text-2xl font-bold text-center text-blue-700 dark:text-blue-400"> {/* Added dark class */}
+          <div className="space-y-6 bg-white p-6 rounded-xl shadow-lg dark:bg-gray-800 dark:text-gray-100">
+            {" "}
+            {/* Added dark classes for Modal content */}
+            <h4 className="text-2xl font-bold text-center text-blue-700 dark:text-blue-400">
+              {" "}
+              {/* Added dark class */}
               Validando Resposta
             </h4>
-            <div className="text-xl font-semibold text-center text-gray-800 dark:text-gray-100"> {/* Added dark class */}
+            <div className="text-xl font-semibold text-center text-gray-800 dark:text-gray-100">
+              {" "}
+              {/* Added dark class */}
               Jogador: {validationData.playerNickname}
             </div>
-            <div className="text-xl font-semibold text-center text-gray-800 dark:text-gray-100"> {/* Added dark class */}
+            <div className="text-xl font-semibold text-center text-gray-800 dark:text-gray-100">
+              {" "}
+              {/* Added dark class */}
               Tema: {validationData.theme}
             </div>
 
-            {(revealed || currentAnswerValidatedInModal) ? (
+            {revealed || currentAnswerValidatedInModal ? (
               <>
-                <div className="text-center text-2xl text-gray-900 font-bold dark:text-gray-50"> {/* Added dark class */}
+                <div className="text-center text-2xl text-gray-900 font-bold dark:text-gray-50">
+                  {" "}
+                  {/* Added dark class */}
                   Resposta:{" "}
-                  <span className="text-blue-600">{validationData.answer || "(Resposta vazia)"}</span>
+                  <span className="text-blue-600">
+                    {validationData.answer || "(Resposta vazia)"}
+                  </span>
                 </div>
 
                 {validationData.validated && validationData.points !== null && (
@@ -459,7 +520,9 @@ export default function GameBoard({
                     Mostrar Resposta
                   </button>
                 ) : (
-                  <p className="text-center text-lg text-gray-500 italic dark:text-gray-400"> {/* Added dark class */}
+                  <p className="text-center text-lg text-gray-500 italic dark:text-gray-400">
+                    {" "}
+                    {/* Added dark class */}
                     Aguardando o juiz revelar a resposta...
                   </p>
                 )}

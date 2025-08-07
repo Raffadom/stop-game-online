@@ -147,6 +147,7 @@ export default function Room({
             <button
               onClick={handleStartRound}
               className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg shadow-md transition-colors duration-200 font-semibold"
+              disabled={roomThemes.length === 0} // Desabilita o botão se nenhuma tema foi adicionado
             >
               Iniciar Rodada
             </button>

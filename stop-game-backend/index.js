@@ -6,35 +6,24 @@ const { Server } = require("socket.io");
 const app = express();
 
 // --- Configuração das origens permitidas (CORS) ---
-// Para desenvolvimento local: 'http://localhost:5173'
-// Para produção (Netlify): 'https://stop-paper.netlify.app'
-// Você pode adicionar mais origens se necessário.
-
-// Obtém a origem permitida do ambiente ou usa um valor padrão para desenvolvimento
 const allowedOrigins = process.env.NODE_ENV === 'production'
-  ? ['https://stop-paper.netlify.app'] // Em produção, apenas o Netlify
-  : ['http://localhost:5173', 'https://stop-paper.netlify.app']; // Em desenvolvimento, ambos
+  ? ['https://stop-paper.netlify.app']
+  : ['http://localhost:5173', 'https://stop-paper.netlify.app'];
 
-// Middleware CORS para Express (útil se você tiver outras rotas HTTP/REST)
 app.use(cors({
   origin: allowedOrigins,
   methods: ["GET", "POST"]
 }));
 
-// --- Rota de Teste para a Raiz (/) ---
-// Isso evita o erro 404 Not Found quando o navegador acessa a URL base do seu backend.
 app.get('/', (req, res) => {
   res.status(200).send("Stop Game Backend is running and ready for Socket.IO connections!");
 });
-// ------------------------------------
 
 const server = http.createServer(app);
 
-// --- Configuração do Socket.IO com CORS específico ---
-// Agora, a origem será dinâmica baseada no ambiente ou incluirá localhost para desenvolvimento.
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins, // <-- AGORA INCLUI LOCALHOST E NETLIFY
+    origin: allowedOrigins,
     methods: ["GET", "POST"]
   }
 });
@@ -44,13 +33,75 @@ const players = {}; // userId -> { id: socket.id, nickname, room, isCreator, use
 const roomsAnswers = {}; // room -> [{ id: userId, nickname, answers: [{ theme, answer, points }] }]
 const stopCallers = {}; // room -> userId do jogador que clicou STOP
 const validationStates = {}; // room -> { currentPlayerIndex, currentThemeIndex, validatorId, roundLetter }
-const roomConfigs = {}; // room -> { themes: [], duration, creatorId, currentLetter, roundTimerId, roundActive, countdownTimerId }
+const roomConfigs = {}; // room -> { themes: [], duration, creatorId, currentLetter, roundTimerId, roundActive, countdownTimerId, roundEnded, stopClickedByMe }
 const roomOverallScores = {}; // room -> { userId: totalScoreForGame }
 
 // --- Eventos do Socket.IO ---
 io.on("connection", (socket) => {
   socket.userId = null;
   socket.room = null;
+
+  // NOVO: Evento para reingresso de usuários após recarga
+  socket.on("rejoin_room", ({ roomId, nickname, userId }) => {
+    console.log(`[Socket.io] Tentativa de reingresso: Sala ${roomId}, Nickname ${nickname}, UserId ${userId}`);
+
+    // 1. Verificar se a sala existe
+    const roomConfig = roomConfigs[roomId];
+    if (!roomConfig) {
+      console.log(`[Socket.io] Reingresso falhou: Sala ${roomId} não encontrada.`);
+      socket.emit('rejoin_room_fail');
+      return;
+    }
+
+    // 2. Verificar se o jogador existe no registro global de players
+    const player = players[userId];
+    if (!player || player.room !== roomId) {
+      console.log(`[Socket.io] Reingresso falhou: Jogador ${nickname} (ID: ${userId}) não encontrado ou não pertence à sala ${roomId}.`);
+      socket.emit('rejoin_room_fail');
+      return;
+    }
+
+    // 3. Atualizar o socket ID do jogador para o novo socket conectado
+    player.id = socket.id; // Atualiza o socket.id do jogador para o novo socket
+    player.nickname = nickname; // Garante que o nickname esteja atualizado
+    socket.userId = userId; // Associa o userId ao novo socket
+    socket.room = roomId; // Associa a sala ao novo socket
+
+    // 4. Fazer o novo socket entrar na sala
+    socket.join(roomId);
+
+    // 5. Obter a lista atualizada de jogadores na sala
+    const playersInRoom = Object.entries(players)
+      .filter(([, p]) => p.room === roomId)
+      .map(([uid, p]) => ({
+        id: p.id,
+        nickname: p.nickname,
+        userId: uid,
+        isCreator: p.isCreator,
+      }));
+
+    // 6. Enviar os dados da sala e do jogador de volta para o cliente que reingressou
+    socket.emit('rejoin_room_success', {
+      room: {
+        roomId: roomId,
+        players: playersInRoom, // Envia a lista de jogadores atualizada
+        config: roomConfig, // Inclui a configuração da sala (temas, duração, criador)
+        currentLetter: roomConfig.currentLetter, // Inclui a letra atual da rodada
+        roundStarted: roomConfig.roundActive, // Usa roundActive para indicar se a rodada está ativa
+        roundEnded: roomConfig.roundEnded || false, // Adiciona o estado roundEnded
+        stopClickedByMe: stopCallers[roomId] === userId, // Verifica se foi ele quem clicou STOP
+      },
+      player: {
+        userId: player.userId,
+        nickname: player.nickname,
+        isCreator: player.isCreator,
+      }
+    });
+
+    // 7. Notificar os outros jogadores na sala sobre a atualização da lista de jogadores
+    io.to(roomId).emit("players_update", playersInRoom);
+    console.log(`[Socket.io] Usuário ${nickname} (${userId}) reingresou com sucesso na sala ${roomId}.`);
+  });
 
   socket.on("join_room", ({ userId, room, nickname }) => {
     if (!userId || !room || !nickname) {
@@ -66,9 +117,12 @@ io.on("connection", (socket) => {
     const existingPlayer = players[userId];
 
     if (existingPlayer && existingPlayer.room === room) {
+      // Se o jogador já existe e está na mesma sala, apenas atualiza o socket.id
       existingPlayer.id = socket.id;
-      existingPlayer.nickname = nickname;
+      existingPlayer.nickname = nickname; // Atualiza o nickname caso tenha mudado
+      console.log(`[Socket.io] Jogador existente ${nickname} (${userId}) reconectado na sala ${room}.`);
     } else {
+      // Novo jogador ou jogador em outra sala, cria um novo registro
       const roomHasCreator = Object.values(players).some((p) => p.room === room && p.isCreator);
       const isCreator = !roomHasCreator;
 
@@ -83,10 +137,13 @@ io.on("connection", (socket) => {
           roundTimerId: null,
           roundActive: false,
           countdownTimerId: null,
+          roundEnded: false, // Adicionado para persistência de estado da rodada
+          stopClickedByMe: null, // Adicionado para persistência de quem clicou STOP
         };
       } else if (isCreator && roomConfigs[room].creatorId === undefined) {
         roomConfigs[room].creatorId = userId;
       }
+      console.log(`[Socket.io] ${nickname} (${userId}) entrou na sala ${room}. É criador: ${isCreator}`);
     }
 
     const playersInRoom = Object.entries(players)
@@ -105,10 +162,13 @@ io.on("connection", (socket) => {
       room: room,
       players: playersInRoom,
       isCreator: players[userId].isCreator,
-      config: roomConfigs[room]
+      config: roomConfigs[room],
+      player: { // Incluindo os dados do jogador que acabou de entrar
+        userId: userId,
+        nickname: nickname,
+        isCreator: players[userId].isCreator,
+      }
     });
-
-    console.log(`[Socket.io] ${nickname} (${userId}) entrou na sala ${room}. É criador: ${players[userId].isCreator}`);
   });
 
   socket.on("update_config", ({ room, duration, themes }) => {
@@ -149,6 +209,8 @@ io.on("connection", (socket) => {
     stopCallers[room] = null;
     validationStates[room] = null;
     if (config.roundTimerId) clearTimeout(config.roundTimerId);
+    config.roundEnded = false; // Garante que o estado da rodada esteja correto
+    config.stopClickedByMe = null; // Garante que o estado do STOP esteja correto
 
     io.to(room).emit("round_start_countdown", { initialCountdown: 3 });
     console.log(`[Socket.io] Iniciando contagem regressiva para a rodada na sala ${room}.`);
@@ -174,7 +236,9 @@ io.on("connection", (socket) => {
     const newLetter = getRandomLetter();
     config.currentLetter = newLetter;
     config.roundActive = true;
-    io.to(room).emit("room_config", config);
+    config.roundEnded = false; // Garante que o estado da rodada esteja correto
+    config.stopClickedByMe = null; // Garante que o estado do STOP esteja correto
+    io.to(room).emit("room_config", config); // Envia a config atualizada (com a letra)
 
     io.to(room).emit("round_started", { duration: config.duration, letter: newLetter });
     console.log(`[Socket.io] Rodada iniciada *de fato* na sala ${room} com a letra ${newLetter}.`);
@@ -185,6 +249,7 @@ io.on("connection", (socket) => {
       if (config.roundTimerId) clearTimeout(config.roundTimerId);
       config.roundTimerId = null;
       config.roundActive = false;
+      config.roundEnded = true; // Marca a rodada como encerrada
       initiateValidationAfterDelay(room);
     }, config.duration * 1000);
   });
@@ -208,6 +273,7 @@ io.on("connection", (socket) => {
       config.roundTimerId = null;
     }
     config.roundActive = false;
+    config.roundEnded = true; // Marca a rodada como encerrada
     stopCallers[room] = socket.userId;
     io.to(room).emit("round_ended");
     initiateValidationAfterDelay(room);
@@ -364,6 +430,8 @@ io.on("connection", (socket) => {
       }
       roomConfigs[room].currentLetter = null;
       roomConfigs[room].roundActive = false;
+      roomConfigs[room].roundEnded = false; // Reseta o estado da rodada
+      roomConfigs[room].stopClickedByMe = null; // Reseta quem clicou STOP
       io.to(room).emit("room_reset_ack");
       io.to(room).emit("room_config", roomConfigs[room]);
     }
@@ -380,6 +448,7 @@ io.on("connection", (socket) => {
     const ranking = finalScores.sort((a, b) => b.total - a.total);
     io.to(room).emit("game_ended", ranking);
 
+    // Limpa todos os dados da sala ao final do jogo
     delete roomsAnswers[room];
     delete stopCallers[room];
     delete validationStates[room];
@@ -393,6 +462,57 @@ io.on("connection", (socket) => {
     delete roomOverallScores[room];
   });
 
+  socket.on("leave_room", () => { // Novo evento para quando o usuário sai explicitamente
+    const userId = socket.userId;
+    const room = socket.room;
+
+    if (!userId || !room) {
+      console.log(`[Socket.io] leave_room: Socket não identificado (userId: ${userId}, room: ${room}).`);
+      return;
+    }
+
+    if (players[userId] && players[userId].room === room) {
+      delete players[userId];
+      socket.leave(room); // Remove o socket da sala
+      console.log(`[Socket.io] Jogador ${userId} saiu explicitamente da sala ${room}.`);
+    } else {
+      console.warn(`[Socket.io] Jogador ${userId} tentou sair da sala ${room}, mas não foi encontrado ou não pertence a esta sala.`);
+    }
+
+    const playersInRoom = Object.values(players).filter((p) => p.room === room);
+    io.to(room).emit("players_update", playersInRoom);
+
+    if (playersInRoom.length === 0) {
+      console.log(`[Socket.io] Sala ${room} vazia após saída. Limpando dados da sala.`);
+      delete roomsAnswers[room];
+      delete stopCallers[room];
+      delete validationStates[room];
+      if (roomConfigs[room] && roomConfigs[room].roundTimerId) {
+        clearTimeout(roomConfigs[room].roundTimerId);
+      }
+      if (roomConfigs[room] && roomConfigs[room].countdownTimerId) {
+        clearTimeout(roomConfigs[room].countdownTimerId);
+      }
+      delete roomConfigs[room];
+      delete roomOverallScores[room];
+    } else {
+      // Lógica para transferir o criador se o criador atual sair
+      const currentCreatorId = roomConfigs[room]?.creatorId;
+      if (currentCreatorId === userId && playersInRoom.length > 0) {
+        const newCreator = playersInRoom[0];
+        roomConfigs[room].creatorId = newCreator.userId;
+        players[newCreator.userId].isCreator = true; // Garante que o novo criador seja marcado como tal
+        console.log(`[Socket.io] Novo criador da sala ${room} é ${newCreator.nickname} (${newCreator.userId}).`);
+
+        io.to(room).emit("players_update", playersInRoom.map(p => ({
+          id: p.id, nickname: p.nickname, userId: p.userId, isCreator: p.userId === newCreator.userId
+        })));
+        io.to(room).emit("room_config", roomConfigs[room]);
+      }
+    }
+  });
+
+
   socket.on("disconnect", () => {
     const userId = socket.userId;
     const room = socket.room;
@@ -402,16 +522,24 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if (players[userId]) {
-      delete players[userId];
-    } else {
-      console.warn(`[Socket.io] Jogador ${userId} desconectado da sala ${room}, mas não encontrado no registro global de players.`);
-    }
+    // Não remove o jogador imediatamente do `players` aqui.
+    // A lógica de reingresso ou de `leave_room` lidará com isso.
+    // Se o jogador reconectar, o `rejoin_room` atualizará o socket.id.
+    // Se o jogador sair explicitamente, o `leave_room` o removerá.
+    // Se o socket desconectar e não houver reingresso em um tempo,
+    // o servidor pode eventualmente limpar jogadores inativos se necessário,
+    // mas para recargas, queremos mantê-los.
 
+    console.log(`[Socket.io] Socket ${socket.id} (usuário ${userId}) desconectado da sala ${room}.`);
+
+    // Apenas atualiza a lista de jogadores para os demais,
+    // sem remover o jogador do registro global `players` ainda.
     const playersInRoom = Object.values(players).filter((p) => p.room === room);
     io.to(room).emit("players_update", playersInRoom);
-    console.log(`[Socket.io] Jogador ${userId} desconectado da sala ${room}. Restam ${playersInRoom.length} jogadores.`);
 
+    // Se a sala ficar vazia após uma desconexão (e não houver reingresso),
+    // a sala será limpa. Isso é importante para evitar salas fantasmas.
+    // No entanto, para persistência, o `players` ainda manterá o registro do userId.
     if (playersInRoom.length === 0) {
       console.log(`[Socket.io] Sala ${room} vazia. Limpando dados da sala.`);
       delete roomsAnswers[room];
@@ -426,11 +554,12 @@ io.on("connection", (socket) => {
       delete roomConfigs[room];
       delete roomOverallScores[room];
     } else {
+      // Lógica para transferir o criador se o criador atual desconectar e a sala não ficar vazia
       const currentCreatorId = roomConfigs[room]?.creatorId;
       if (currentCreatorId === userId && playersInRoom.length > 0) {
         const newCreator = playersInRoom[0];
         roomConfigs[room].creatorId = newCreator.userId;
-        players[newCreator.userId].isCreator = true;
+        players[newCreator.userId].isCreator = true; // Garante que o novo criador seja marcado como tal
         console.log(`[Socket.io] Novo criador da sala ${room} é ${newCreator.nickname} (${newCreator.userId}).`);
 
         io.to(room).emit("players_update", playersInRoom.map(p => ({
@@ -539,7 +668,6 @@ function initiateValidationAfterDelay(room) {
 }
 
 // --- Inicia o Servidor ---
-// Usa a porta fornecida pelo ambiente (Render) ou 3001 para desenvolvimento local.
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`✅ Servidor rodando na porta ${PORT}`);

@@ -40,7 +40,7 @@ export default function GameBoard({
   }, [answers]);
 
   // Efeito para inicializar/atualizar as respostas com base nos temas da sala
-useEffect(() => {
+  useEffect(() => {
     const themesChanged =
       JSON.stringify(roomThemes) !== JSON.stringify(answers.map((a) => a.theme));
 
@@ -102,7 +102,7 @@ useEffect(() => {
   useEffect(() => {
     const handleRoundEnded = () => {
       console.log("🔔 Evento round_ended recebido — enviando respostas...");
-      if (roundStarted) {
+      if (roundStarted) { // Apenas envia se a rodada estava realmente ativa no cliente
         socket.emit("submit_answers", answersRef.current);
       }
     };
@@ -110,8 +110,8 @@ useEffect(() => {
     const handleGameEnded = (ranking) => {
       console.log("🎉 game_ended recebido, ranking final:", ranking);
       setFinalRanking(ranking);
-      setShowModal(true);
-      setShowResults(false);
+      setShowModal(true); // Pode ser true para mostrar o ranking final na modal
+      setShowResults(false); // Não mostra os resultados individuais da rodada se o jogo terminou
     };
 
     const handleStartValidation = ({ current, judgeId }) => {
@@ -124,17 +124,17 @@ useEffect(() => {
       setShowModal(true);
       setValidationData(current);
       setCanReveal(socket.id === judgeId);
-      setRevealed(false);
-      setCurrentAnswerValidatedInModal(false);
+      setRevealed(false); // Garante que não está revelado antes de o juiz clicar
+      setCurrentAnswerValidatedInModal(false); // Garante que não está validado antes da validação
       setShowResults(false);
       setTotalPoints(null);
     };
 
     const handleRevealAnswer = () => {
+      console.log("Recebido evento reveal_answer. Definindo revealed para true.");
       setRevealed(true);
-      if (validationData?.validated) {
-        setCurrentAnswerValidatedInModal(true);
-      }
+      // Não há necessidade de verificar validationData?.validated aqui.
+      // currentAnswerValidatedInModal será definido apenas após a validação real.
     };
 
     const handleAnswerValidated = ({ current }) => {
@@ -146,8 +146,8 @@ useEffect(() => {
             : a
         )
       );
-      setValidationData(current);
-      setCurrentAnswerValidatedInModal(true);
+      setValidationData(current); // Atualiza os dados de validação para a modal
+      setCurrentAnswerValidatedInModal(true); // Agora sim, a resposta na modal está validada
     };
 
     const handleAllAnswersValidated = (allPlayersRoundScores) => {
@@ -160,10 +160,11 @@ useEffect(() => {
         setPlayerOverallScore(myScore.overallScore);
       }
 
-      setShowModal(false);
+      setShowModal(false); // Fecha a modal de validação
       setValidationData(null);
       setCurrentAnswerValidatedInModal(false);
-      setShowResults(true);
+      setRevealed(false); // Limpa o estado revelado
+      setShowResults(true); // Exibe os resultados da rodada
     };
 
     socket.on("round_ended", handleRoundEnded);

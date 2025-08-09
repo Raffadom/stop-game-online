@@ -23,7 +23,6 @@ export default function Room({
   handleStopRound,
   handleLeaveRoom,
   onResetRound,
-  // --- NOVAS PROPS ---
   isRoomSaved,
   handleSaveRoom,
 }) {
@@ -79,9 +78,9 @@ export default function Room({
 
       {/* Informações da Sala */}
       <div className="bg-white p-6 rounded-xl shadow w-full flex flex-col space-y-2 dark:bg-gray-800 dark:text-gray-100">
-        <div className="text-lg font-semibold text-gray-700 dark:text-gray-300 flex items-center flex-wrap gap-2"> {/* Adicionado flex items-center flex-wrap gap-2 */}
+        <div className="text-lg font-semibold text-gray-700 dark:text-gray-300 flex items-center flex-wrap gap-2">
           Sala: <span className="font-bold text-blue-600">{room}</span>
-          {isRoomSaved && ( // Ícone da sala salva
+          {isRoomSaved && (
             <span className="text-green-500" title="Sala salva">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 inline-block align-middle">
                 <path fillRule="evenodd" d="M10.788 3.212c.44-.914 1.83-.914 2.27 0l.953 1.977.842 1.75a1.125 1.125 0 011.666 1.077l-.546 2.73a1.125 1.125 0 00.334 1.125l2.148 2.148a1.125 1.125 0 01.124 1.574l-1.6 2.401a1.125 1.125 0 01-1.423.423l-2.401-1.6a1.125 1.125 0 00-1.574-.124l-2.148 2.148a1.125 1.125 0 01-1.125.334l-2.73-.546a1.125 1.125 0 01-1.077-1.666l1.75-.842 1.977-.953a1.125 1.125 0 000-2.27l-1.977-.953-1.75-.842a1.125 1.125 0 01-1.077-1.666l.546-2.73a1.125 1.125 0 00-.334-1.125L3.212 7.84a1.125 1.125 0 01-.124-1.574l1.6-2.401a1.125 1.125 0 011.423-.423l2.401 1.6a1.125 1.125 0 001.574.124l2.148-2.148a1.125 1.125 0 011.125-.334l2.73.546a1.125 1.125 0 011.077 1.666l-1.75.842-1.977.953z" clipRule="evenodd" />
@@ -100,15 +99,14 @@ export default function Room({
               Link da sala copiado!
             </span>
           )}
-          {/* Botão Salvar Sala (visível apenas para admin e fora de rodada ativa) */}
           {isAdmin && !roundStarted && !roundEnded && (
-              <button
-                  onClick={handleSaveRoom}
-                  className="px-3 py-1 bg-yellow-500 text-white rounded-md text-sm hover:bg-yellow-600 transition-colors shadow"
-                  title="Salvar configurações da sala"
-              >
-                  💾 Salvar Sala
-              </button>
+            <button
+              onClick={handleSaveRoom}
+              className="px-3 py-1 bg-yellow-500 text-white rounded-md text-sm hover:bg-yellow-600 transition-colors shadow"
+              title="Salvar configurações da sala"
+            >
+              💾 Salvar Sala
+            </button>
           )}
         </div>
         <div className="text-lg font-semibold text-gray-700 dark:text-gray-300">
@@ -131,13 +129,11 @@ export default function Room({
             ))}
           </div>
         </div>
-        {/* Contagem Regressiva para iniciar a rodada */}
         {countdown !== null && countdown > 0 && (
           <div className="text-7xl font-extrabold text-blue-600 animate-pulse text-center">
             {countdown}
           </div>
         )}
-        {/* Exibe a letra somente quando a rodada está ativa */}
         {letter && roundStarted && !roundEnded && (
           <div className="text-lg font-semibold mt-2 text-gray-700 text-center dark:text-gray-300">
             A letra é:{" "}
@@ -174,7 +170,6 @@ export default function Room({
           </div>
         )}
 
-        {/* Timer da rodada ativa */}
         {roundStarted && countdown === null && (
           <>
             <Timer duration={roomDuration} />
@@ -210,6 +205,7 @@ export default function Room({
           roomDuration={roomDuration}
           stopClickedByMe={stopClickedByMe}
           handleStopRound={handleStopRound}
+          room={room} // Adicionada a prop room
         />
       </div>
 

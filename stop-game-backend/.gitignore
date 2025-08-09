@@ -16,3 +16,6 @@ Thumbs.db
 
 # VSCode
 .vscode/
+
+# Firestore
+stopgame_firebase.json

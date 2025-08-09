@@ -3,6 +3,35 @@ import GameBoard from "./GameBoard";
 import Timer from "./Timer";
 import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
 
+// Alertas customizados para melhor UX
+const Alert = ({ message, type, isVisible, onClose }) => {
+  if (!isVisible) return null;
+
+  const getBackgroundColor = () => {
+    switch (type) {
+      case 'success':
+        return 'bg-green-500';
+      case 'warning':
+        return 'bg-yellow-500';
+      case 'error':
+        return 'bg-red-500';
+      default:
+        return 'bg-blue-500';
+    }
+  };
+
+  return (
+    <div
+      className={`fixed top-4 left-1/2 -translate-x-1/2 p-4 rounded-lg shadow-xl text-white font-semibold transition-all duration-300 ease-out z-50 animate-fade-in ${getBackgroundColor()}`}
+    >
+      <span>{message}</span>
+      <button onClick={onClose} className="ml-4 font-bold">
+        &times;
+      </button>
+    </div>
+  );
+};
+
 export default function Room({
   nickname,
   room,
@@ -27,11 +56,13 @@ export default function Room({
   handleSaveRoom,
 }) {
   const [showCopiedMessage, setShowCopiedMessage] = useState(false);
-
   const [theme, setTheme] = useState(() => {
     const savedTheme = localStorage.getItem('theme');
     return savedTheme ? savedTheme : 'light';
   });
+
+  // Estado para os alerts
+  const [alertState, setAlertState] = useState({ isVisible: false, message: '', type: '' });
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -42,6 +73,16 @@ export default function Room({
     }
     localStorage.setItem('theme', theme);
   }, [theme]);
+
+  // Efeito para esconder o alert após 3 segundos
+  useEffect(() => {
+    if (alertState.isVisible) {
+      const timer = setTimeout(() => {
+        setAlertState({ isVisible: false, message: '', type: '' });
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [alertState]); // A dependência setAlertState é desnecessária se não for modificada
 
   const toggleTheme = () => {
     setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
@@ -61,8 +102,27 @@ export default function Room({
       });
   };
 
+  const handleSaveRoomWithDetails = () => {
+    handleSaveRoom(room);
+  };
+
+  const handleDurationChange = (e) => {
+    setRoomDuration(Number(e.target.value));
+  };
+  
+  const saveButtonText = isRoomSaved ? '✅ Sala Salva' : '💾 Salvar Sala';
+  const saveButtonColor = isRoomSaved ? 'bg-green-500 hover:bg-green-600' : 'bg-yellow-500 hover:bg-yellow-600';
+
   return (
     <div className="flex flex-col min-h-screen max-w-5xl mx-auto px-4 py-6 space-y-8 relative">
+      {/* Componente de alerta */}
+      <Alert
+        message={alertState.message}
+        type={alertState.type}
+        isVisible={alertState.isVisible}
+        onClose={() => setAlertState({ isVisible: false, message: '', type: '' })}
+      />
+
       {/* Botão de Tema no canto superior direito */}
       <button
         onClick={toggleTheme}
@@ -101,11 +161,11 @@ export default function Room({
           )}
           {isAdmin && !roundStarted && !roundEnded && (
             <button
-              onClick={handleSaveRoom}
-              className="px-3 py-1 bg-yellow-500 text-white rounded-md text-sm hover:bg-yellow-600 transition-colors shadow"
+              onClick={handleSaveRoomWithDetails}
+              className={`px-3 py-1 text-white rounded-md text-sm transition-colors shadow font-semibold ${saveButtonColor}`}
               title="Salvar configurações da sala"
             >
-              💾 Salvar Sala
+              {saveButtonText}
             </button>
           )}
         </div>
@@ -154,7 +214,7 @@ export default function Room({
                 id="duration-input"
                 type="number"
                 value={roomDuration}
-                onChange={(e) => setRoomDuration(Number(e.target.value))}
+                onChange={handleDurationChange}
                 className="w-24 border border-gray-300 p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-400 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
                 min={10}
                 max={300}
@@ -205,7 +265,11 @@ export default function Room({
           roomDuration={roomDuration}
           stopClickedByMe={stopClickedByMe}
           handleStopRound={handleStopRound}
-          room={room} // Adicionada a prop room
+          room={room}
+          isRoomSaved={isRoomSaved}
+          handleSaveRoom={handleSaveRoom}
+          alertState={alertState}
+          setAlertState={setAlertState}
         />
       </div>
 

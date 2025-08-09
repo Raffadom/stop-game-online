@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from "react";
 import { socket } from "../socket";
 import Modal from "./Modal"; // Certifique-se de que o caminho para o Modal está correto
 
+// O componente Alert foi movido para Room.jsx, não é mais importado aqui.
+
 export default function GameBoard({
   roundStarted,
   roundEnded,
@@ -12,10 +14,11 @@ export default function GameBoard({
   userId,
   roomThemes,
   setRoomThemes,
-  setRoomDuration,
+  setRoomDuration, // Mantido, mas a lógica de auto-salvar está em App.jsx
   stopClickedByMe,
   handleStopRound,
-  room, // Added room prop
+  room, // Mantido para enviar em eventos socket
+  // As props isRoomSaved, handleSaveRoom, alertState, setAlertState foram removidas daqui
 }) {
   const maxThemes = 10;
   const [answers, setAnswers] = useState([]);
@@ -28,9 +31,8 @@ export default function GameBoard({
   const [showModal, setShowModal] = useState(false);
   const [validationData, setValidationData] = useState(null);
   const [canReveal, setCanReveal] = useState(false);
-  const [revealed, setRevealed] = useState(false); // Estado para controlar se a resposta foi revelada
-  const [currentAnswerValidatedInModal, setCurrentAnswerValidatedInModal] =
-    useState(false);
+  const [revealed, setRevealed] = useState(false);
+  const [currentAnswerValidatedInModal, setCurrentAnswerValidatedInModal] = useState(false);
 
   const [playerOverallScore, setPlayerOverallScore] = useState(0);
 
@@ -40,10 +42,8 @@ export default function GameBoard({
     answersRef.current = answers;
   }, [answers]);
 
-  // Efeito para inicializar/atualizar as respostas com base nos temas da sala
   useEffect(() => {
-    const themesChanged =
-      JSON.stringify(roomThemes) !== JSON.stringify(answers.map((a) => a.theme));
+    const themesChanged = JSON.stringify(roomThemes) !== JSON.stringify(answers.map((a) => a.theme));
 
     if (roomThemes && roomThemes.length > 0) {
       if (themesChanged || answers.length === 0) {
@@ -60,23 +60,15 @@ export default function GameBoard({
     } else if (roomThemes && roomThemes.length === 0) {
       console.log("GameBoard: Nenhum tema restante. Limpando campos de resposta.");
       setAnswers([]);
-    } else if (
-      !isAdmin &&
-      !roundStarted &&
-      !roundEnded &&
-      answers.length === 0
-    ) {
+    } else if (!isAdmin && !roundStarted && !roundEnded && answers.length === 0) {
       console.log("GameBoard: Inicializando com um campo vazio para jogador não-admin, aguardando temas.");
       setAnswers([{ theme: "", answer: "", points: null, validated: false }]);
     }
   }, [roomThemes, isAdmin, roundStarted, roundEnded, answers.length]);
 
-  // Efeito para resetar a rodada (quando o admin clica em 'Nova Rodada')
   useEffect(() => {
     if (resetRoundFlag) {
-      console.log(
-        "🔄 GameBoard: resetRoundFlag ativada. Reiniciando estados e campos de tema."
-      );
+      console.log("🔄 GameBoard: resetRoundFlag ativada. Reiniciando estados e campos de tema.");
       setAnswers(
         roomThemes.map((theme) => ({
           theme: theme,
@@ -91,18 +83,17 @@ export default function GameBoard({
       setShowModal(false);
       setValidationData(null);
       setCanReveal(false);
-      setRevealed(false); // Garante que a resposta não está revelada
+      setRevealed(false);
       setCurrentAnswerValidatedInModal(false);
       setPlayerOverallScore(0);
       onResetRound();
     }
   }, [resetRoundFlag, onResetRound, roomThemes]);
 
-  // Event Listeners para Socket.IO
   useEffect(() => {
     const handleRoundEnded = () => {
       console.log("🔔 Evento round_ended recebido — enviando respostas...");
-      if (roundStarted) { // Apenas envia se a rodada estava realmente ativa no cliente
+      if (roundStarted) {
         socket.emit("submit_answers", answersRef.current);
       }
     };
@@ -110,22 +101,17 @@ export default function GameBoard({
     const handleGameEnded = (ranking) => {
       console.log("🎉 game_ended recebido, ranking final:", ranking);
       setFinalRanking(ranking);
-      setShowModal(true); // Pode ser true para mostrar o ranking final na modal
-      setShowResults(false); // Não mostra os resultados individuais da rodada se o jogo terminou
+      setShowModal(true);
+      setShowResults(false);
     };
 
     const handleStartValidation = ({ current, judgeId }) => {
-      console.log(
-        "📨 start_validation recebido:",
-        current,
-        " | Juiz Socket ID:",
-        judgeId
-      );
+      console.log("📨 start_validation recebido:", current, " | Juiz Socket ID:", judgeId);
       setShowModal(true);
       setValidationData(current);
       setCanReveal(socket.id === judgeId);
-      setRevealed(false); // Garante que não está revelado antes de o juiz clicar
-      setCurrentAnswerValidatedInModal(false); // Garante que não está validado antes da validação
+      setRevealed(false);
+      setCurrentAnswerValidatedInModal(false);
       setShowResults(false);
       setTotalPoints(null);
     };
@@ -144,25 +130,23 @@ export default function GameBoard({
             : a
         )
       );
-      setValidationData(current); // Atualiza os dados de validação para a modal
-      setCurrentAnswerValidatedInModal(true); // Agora sim, a resposta na modal está validada
+      setValidationData(current);
+      setCurrentAnswerValidatedInModal(true);
     };
 
     const handleAllAnswersValidated = (allPlayersRoundScores) => {
       console.log("🏁 Todas as respostas validadas!", allPlayersRoundScores);
-      const myScore = allPlayersRoundScores.find(
-        (score) => score.userId === userId
-      );
+      const myScore = allPlayersRoundScores.find((score) => score.userId === userId);
       if (myScore) {
         setTotalPoints(myScore.roundScore);
         setPlayerOverallScore(myScore.overallScore);
       }
 
-      setShowModal(false); // Fecha a modal de validação
+      setShowModal(false);
       setValidationData(null);
       setCurrentAnswerValidatedInModal(false);
-      setRevealed(false); // Limpa o estado revelado para a próxima rodada
-      setShowResults(true); // Exibe os resultados da rodada
+      setRevealed(false);
+      setShowResults(true);
     };
 
     socket.on("round_ended", handleRoundEnded);
@@ -182,14 +166,12 @@ export default function GameBoard({
     };
   }, [userId, roundStarted, answers, validationData]);
 
-  // Handler para mudança de resposta em um campo
   const handleAnswerInputChange = (index, value) => {
     const newAnswers = [...answers];
     newAnswers[index].answer = value;
     setAnswers(newAnswers);
   };
 
-  // Handler para adicionar um novo tema
   const handleAddTheme = () => {
     const trimmedTheme = newThemeInput.trim();
     if (trimmedTheme && !roomThemes.includes(trimmedTheme) && roomThemes.length < maxThemes) {
@@ -199,7 +181,6 @@ export default function GameBoard({
     }
   };
 
-  // Handler para remover um tema existente
   const handleRemoveTheme = (themeToRemove) => {
     const updatedThemes = roomThemes.filter((theme) => theme !== themeToRemove);
     setRoomThemes(updatedThemes);
@@ -214,7 +195,6 @@ export default function GameBoard({
   const handleReveal = () => {
     console.log("Botão Mostrar Resposta clicado. Socket ID:", socket.id, "Emitindo reveal_answer para sala:", room);
     socket.emit("reveal_answer", { room });
-    // Fallback: define revealed como true após 1 segundo se o servidor não responder
     setTimeout(() => {
       if (!revealed) {
         console.log("Fallback: Servidor não respondeu reveal_answer. Definindo revealed localmente.");
@@ -224,9 +204,9 @@ export default function GameBoard({
   };
 
   const handleValidation = (isValid) => {
-  console.log("handleValidation chamado. Enviando validate_answer com valid:", isValid, "para sala:", room);
-  socket.emit("validate_answer", { valid: isValid, room });
-};
+    console.log("handleValidation chamado. Enviando validate_answer com valid:", isValid, "para sala:", room);
+    socket.emit("validate_answer", { valid: isValid, room });
+  };
   const handleNext = () => socket.emit("next_validation");
 
   console.log(
@@ -248,6 +228,8 @@ export default function GameBoard({
 
   return (
     <div className="w-full h-full flex flex-col space-y-6">
+      {/* O componente de alerta foi movido para Room.jsx, não é mais renderizado aqui. */}
+
       {/* Letra da Rodada (visível apenas quando a rodada está ativa) */}
       {letter && roundStarted && !roundEnded && (
         <div className="text-center text-3xl font-bold mb-4 text-blue-700 select-none dark:text-blue-400">
@@ -294,6 +276,7 @@ export default function GameBoard({
               </span>
             ))}
           </div>
+          {/* O botão Salvar Sala foi movido para o Room.jsx */}
         </div>
       )}
 
@@ -333,7 +316,7 @@ export default function GameBoard({
               </div>
             ))}
           </div>
-          {/* NOVO: Botão STOP ao final dos temas para facilitar o acesso em mobile */}
+          {/* Botão STOP ao final dos temas para facilitar o acesso em mobile */}
           {roundStarted && !roundEnded && !stopClickedByMe && (
             <div className="flex justify-center mt-4">
               <button

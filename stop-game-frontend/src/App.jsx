@@ -5,17 +5,25 @@ import Room from './components/Room';
 import { v4 as uuidv4 } from 'uuid';
 
 function App() {
+  const [userId] = useState(() => {
+    let currentId = localStorage.getItem('userId');
+    if (!currentId) {
+      currentId = uuidv4();
+      localStorage.setItem('userId', currentId);
+    }
+    return currentId;
+  });
+
   const [nickname, setNickname] = useState('');
   const [room, setRoom] = useState('');
-  const [userId, setUserId] = useState(null);
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [isInRoom, setIsInRoom] = useState(false);
   const [roomError, setRoomError] = useState(null);
-  const [playersInRoom, setPlayersInRoom] = useState([]);
+  const [playersInRoom, setPlayersInRoom] = useState([]); 
   const [isAdmin, setIsAdmin] = useState(false);
 
   // Estados relacionados ao jogo
-  const [roomThemes, setRoomThemes] = useState([]);
+  const [roomThemes, setRoomThemes] = useState([]); 
   const [roomDuration, setRoomDuration] = useState(60);
   const [letter, setLetter] = useState(null);
   const [roundStarted, setRoundStarted] = useState(false);
@@ -23,9 +31,18 @@ function App() {
   const [resetRoundFlag, setResetRoundFlag] = useState(false);
   const [stopClickedByMe, setStopClickedByMe] = useState(false);
 
+  // Estados para gerenciamento de sala salva e alertas
+  const [isRoomSaved, setIsRoomSaved] = useState(false);
+  const [alert, setAlert] = useState({ isVisible: false, message: '', type: '' });
+
   // Estado e ref para o countdown de início de rodada
   const [countdown, setCountdown] = useState(null);
   const countdownIntervalRef = useRef(null);
+
+  // Ref para controlar se um salvamento acabou de ocorrer (usado para ignorar o room_error do backend)
+  const justSavedRef = useRef(false);
+
+  // --- Funções de Callback (memoizadas com useCallback) ---
 
   const clearLocalCountdown = useCallback(() => {
     if (countdownIntervalRef.current) {
@@ -55,61 +72,77 @@ function App() {
     }, 1000);
   }, [clearLocalCountdown]);
 
-  // --- NOVO: Efeito para lidar com a persistência e reconexão ---
-  useEffect(() => {
-    let currentUserId = localStorage.getItem('userId');
-    if (!currentUserId) {
-      currentUserId = uuidv4();
-      localStorage.setItem('userId', currentUserId);
-    }
-    setUserId(currentUserId);
-
-    // Tenta reingressar em uma sala se os dados existirem no localStorage
-    const savedRoomId = localStorage.getItem('roomId');
-    const savedNickname = localStorage.getItem('nickname');
-    // Já temos currentUserId do bloco acima
-
-    if (savedRoomId && savedNickname && currentUserId) {
-      console.log(`Tentando reingressar na sala ${savedRoomId} como ${savedNickname} (ID: ${currentUserId})...`);
-      // Emite 'rejoin_room' apenas se o socket já estiver conectado
-      // Caso contrário, será tratado pelo listener 'onConnect'
-      if (socket.connected) {
-        socket.emit('rejoin_room', {
-          roomId: savedRoomId,
-          nickname: savedNickname,
-          userId: currentUserId,
-        });
-      } else {
-        console.log("Socket ainda não conectado, tentará reingresso após a conexão.");
-      }
-    }
-
-    // Listener para reingresso bem-sucedido
-    const onRejoinRoomSuccess = (data) => {
-      console.log('Reingresso bem-sucedido!', data);
-      setIsInRoom(true);
-      setRoom(data.room.roomId);
-      setNickname(data.player.nickname); // Garante que o nickname seja definido pelos dados do jogador reingressado
-      setUserId(data.player.userId); // Garante que o userId seja definido pelos dados do jogador reingressado
-      setPlayersInRoom(data.room.players);
-      setIsAdmin(data.player.isCreator);
-      setRoomThemes(data.room.config.themes || []);
-      setRoomDuration(data.room.config.duration || 60);
-      setLetter(data.room.currentLetter || null); // Restaura a letra atual se disponível
-      setRoundStarted(data.room.roundStarted || false); // Restaura o estado da rodada
-      setRoundEnded(data.room.roundEnded || false); // Restaura o estado da rodada
-      setStopClickedByMe(data.room.stopClickedByMe || false); // Restaura o estado do STOP
+  const handleJoinOrCreateRoom = useCallback((roomName, playerNickname) => {
+    if (socket.connected) {
+      setNickname(playerNickname);
+      setRoom(roomName);
       setRoomError(null);
-      setResetRoundFlag(false);
-      clearLocalCountdown();
-    };
+      socket.emit('join_room', { userId, room: roomName, nickname: playerNickname });
+    } else {
+      setRoomError("Conexão com o servidor não estabelecida. Tente novamente.");
+    }
+  }, [userId]);
 
-    // Listener para reingresso falho
-    const onRejoinRoomFail = () => {
-      console.log('Reingresso falhou. Limpando local storage e resetando estado.');
-      localStorage.removeItem('roomId');
-      localStorage.removeItem('nickname');
-      // O userId pode ser válido para uma nova sala, então não o removemos aqui
+  const handleChangeRoomThemes = useCallback((newThemes) => {
+    if (isAdmin && room) {
+      setRoomThemes(newThemes);
+      setIsRoomSaved(false); // Reseta o estado de salvo ao alterar os temas
+      socket.emit('update_config', { room, themes: newThemes });
+      console.log("Emitindo update_config (themes) para sala:", room, newThemes);
+    }
+  }, [isAdmin, room]);
+
+  const handleChangeRoomDuration = useCallback((newDuration) => {
+    if (isAdmin && room) {
+      setRoomDuration(newDuration);
+      setIsRoomSaved(false); // Reseta o estado de salvo ao alterar a duração
+      socket.emit('update_config', { room, duration: newDuration });
+      console.log("Emitindo update_config (duration) para sala:", room, newDuration);
+    }
+  }, [isAdmin, room]);
+  
+  const handleSaveRoom = useCallback((currentRoomId) => {
+    if (isAdmin && currentRoomId && !roundStarted && !roundEnded) {
+      console.log(`Frontend: Emitindo 'save_room' para a sala: ${currentRoomId}`);
+      
+      // ABORDAGEM OTIMISTA: Assume sucesso imediatamente na UI
+      setAlert({ isVisible: true, message: `A sala ${currentRoomId} foi salva!`, type: 'success' }); 
+      setIsRoomSaved(true); 
+      console.log("handleSaveRoom: isRoomSaved set to TRUE (optimistic update)."); 
+      
+      justSavedRef.current = true; 
+      socket.emit('save_room', { room: currentRoomId, roomName: currentRoomId });
+
+      setTimeout(() => {
+          justSavedRef.current = false;
+          console.log("handleSaveRoom: justSavedRef reset to FALSE after timeout.");
+      }, 1000); 
+      
+    } else if (!isAdmin) {
+      setAlert({ isVisible: true, message: "Somente o administrador pode salvar a sala.", type: 'error' });
+    }
+  }, [isAdmin, room, roundStarted, roundEnded, setAlert]);
+
+  const handleStartRound = useCallback(() => {
+    if (isAdmin && !roundStarted && !roundEnded && countdown === null) {
+      socket.emit('start_round', { room });
+      console.log("Emitindo start_round (para iniciar contagem regressiva) para sala:", room);
+    } else {
+      console.log("handleStartRound: Não pode iniciar rodada. Admin:", isAdmin, "RoundStarted:", roundStarted, "RoundEnded:", roundEnded, "Countdown:", countdown);
+    }
+  }, [isAdmin, roundStarted, roundEnded, countdown, room]);
+
+  const handleStopRound = useCallback(() => {
+    if (roundStarted && !roundEnded && !stopClickedByMe) {
+      socket.emit('stop_round');
+      setStopClickedByMe(true);
+      console.log("STOP clicado!");
+    }
+  }, [roundStarted, roundEnded, stopClickedByMe]);
+
+  const handleLeaveRoom = useCallback(() => {
+    if (isInRoom) {
+      socket.emit('leave_room');
       setIsInRoom(false);
       setRoom('');
       setNickname('');
@@ -121,36 +154,252 @@ function App() {
       setRoundStarted(false);
       setRoundEnded(false);
       setStopClickedByMe(false);
-      setRoomError("Não foi possível reentrar na sala. A sala pode não existir mais ou seus dados estão inválidos.");
+      setRoomError(null);
       setResetRoundFlag(false);
       clearLocalCountdown();
-    };
+      setIsRoomSaved(false);
+      localStorage.removeItem('roomId');
+      localStorage.removeItem('nickname');
+      localStorage.removeItem('userId'); // Certifica-se de limpar o userId para um novo início
+      console.log("Saiu da sala (estado do frontend limpo e localStorage removido).");
+    }
+  }, [isInRoom, clearLocalCountdown]);
 
-    socket.on('rejoin_room_success', onRejoinRoomSuccess);
-    socket.on('rejoin_room_fail', onRejoinRoomFail);
+  const onResetRound = useCallback(() => {
+    console.log("onResetRound chamado do GameBoard. Definindo resetRoundFlag para false.");
+    setResetRoundFlag(false);
+  }, []);
 
-    return () => {
-      socket.off('rejoin_room_success', onRejoinRoomSuccess);
-      socket.off('rejoin_room_fail', onRejoinRoomFail);
-    };
-  }, [userId, clearLocalCountdown]); // userId é uma dependência porque é usado na lógica de reingresso
+  // --- Funções de Listener (memoizadas com useCallback para estabilidade) ---
 
+  const onRejoinRoomSuccess = useCallback((data) => {
+    console.log('Frontend: Reingresso bem-sucedido! Dados recebidos:', data);
+    console.log('Frontend: onRejoinRoomSuccess - room.config:', data.room?.config);
+    console.log('Frontend: onRejoinRoomSuccess - player.isCreator:', data.player?.isCreator);
+    console.log('Frontend: onRejoinRoomSuccess - room.isSaved:', data.room?.isSaved);
+    console.log('Frontend: onRejoinRoomSuccess - room.roundStarted:', data.room?.roundStarted);
+    console.log('Frontend: onRejoinRoomSuccess - room.roundEnded:', data.room?.roundEnded);
+    console.log('Frontend: onRejoinRoomSuccess - room.currentLetter:', data.room?.currentLetter);
 
+    setIsInRoom(true);
+    setRoom(data.room?.roomId || ''); 
+    setNickname(data.player?.nickname || ''); 
+    setPlayersInRoom(data.room?.players || []); 
+    setIsAdmin(data.player?.isCreator || false); 
+    setRoomThemes(data.room?.config?.themes || []); 
+    setRoomDuration(data.room?.config?.duration || 60); 
+    setLetter(data.room?.currentLetter || null);
+    setRoundStarted(data.room?.roundStarted || false);
+    setRoundEnded(data.room?.roundEnded || false);
+    setStopClickedByMe(data.room?.stopClickedByMe || null);
+    setIsRoomSaved(data.room?.isSaved || false); 
+    console.log("onRejoinRoomSuccess: isRoomSaved set to", data.room?.isSaved || false); 
+    setRoomError(null);
+    setResetRoundFlag(false);
+    clearLocalCountdown();
+    setAlert({ isVisible: true, message: `Reconectado à sala ${data.room?.roomId || ''}!`, type: 'success' });
+  }, [clearLocalCountdown]);
+
+  const onRejoinRoomFail = useCallback(() => {
+    console.log('Frontend: Reingresso falhou. Limpando local storage e resetando estado.');
+    localStorage.removeItem('roomId');
+    localStorage.removeItem('nickname');
+    localStorage.removeItem('userId'); // Garante que o userId seja limpo para evitar tentativas de reingresso inválidas
+    setIsInRoom(false);
+    setRoom('');
+    setNickname('');
+    setPlayersInRoom([]);
+    setIsAdmin(false);
+    setRoomThemes([]);
+    setRoomDuration(60);
+    setLetter(null);
+    setRoundStarted(false);
+    setRoundEnded(false);
+    setStopClickedByMe(false);
+    setIsRoomSaved(false);
+    setRoomError("Não foi possível reentrar na sala. A sala pode não existir mais ou seus dados estão inválidos.");
+    setResetRoundFlag(false);
+    clearLocalCountdown();
+  }, [clearLocalCountdown]);
+
+  const onRoomSavedSuccess = useCallback((data) => {
+    console.warn("Frontend: 'room_saved_success' recebido. Este evento pode estar ausente do backend ou interferir com 'room_error'.");
+  }, []);
+
+  const onRoomConfigUpdated = useCallback((config) => {
+    console.log("Frontend: 'room_config' recebido. Dados:", config);
+    if (!config || typeof config !== 'object') {
+        console.warn("Frontend: 'room_config' recebido com dados inválidos:", config);
+        return; 
+    }
+    
+    if (config.themes && JSON.stringify(config.themes) !== JSON.stringify(roomThemes)) {
+      setRoomThemes(config.themes);
+      if (isRoomSaved) { 
+          setIsRoomSaved(false); 
+          console.log("onRoomConfigUpdated: Temas alterados, isRoomSaved set to FALSE."); 
+      }
+      console.log("Temas da sala atualizados (via room_config):", config.themes);
+    }
+    if (config.duration !== undefined && config.duration !== roomDuration) {
+      setRoomDuration(config.duration);
+      if (isRoomSaved) { 
+          setIsRoomSaved(false); 
+          console.log("onRoomConfigUpdated: Duração alterada, isRoomSaved set to FALSE."); 
+      }
+      console.log("Duração da sala atualizada (via room_config):", config.duration);
+    }
+    if (config.isSaved !== undefined && config.isSaved !== isRoomSaved) {
+      setIsRoomSaved(config.isSaved);
+      console.log("Status isRoomSaved atualizado (via room_config):", config.isSaved); 
+    }
+    if (config.currentLetter !== undefined) {
+      setLetter(config.currentLetter);
+    }
+    if (config.roundActive !== undefined) {
+      setRoundStarted(config.roundActive);
+    }
+    if (config.roundEnded !== undefined) {
+      setRoundEnded(config.roundEnded);
+    }
+    if (config.stopClickedByMe !== undefined) {
+      setStopClickedByMe(config.stopClickedByMe);
+    }
+  }, [roomThemes, roomDuration, isRoomSaved]); 
+
+  const onChangesSavedSuccess = useCallback(() => {
+    console.log("Frontend: 'changes_saved_success' recebido.");
+    setAlert({ isVisible: true, message: 'Alterações salvas automaticamente!', type: 'success' }); 
+    setIsRoomSaved(true); 
+    console.log("onChangesSavedSuccess: isRoomSaved set to TRUE."); 
+  }, []); 
+
+  const onRoomJoined = useCallback((data) => {
+    console.log("Frontend: 'room_joined' recebido. Dados:", data);
+    console.log('Frontend: onRoomJoined - config:', data.config);
+    console.log('Frontend: onRoomJoined - player.isCreator:', data.player?.isCreator);
+    console.log('Frontend: onRoomJoined - isCreator (top-level):', data.isCreator); // Propriedade de nível superior
+    console.log('Frontend: onRoomJoined - isSaved (top-level):', data.isSaved); // Propriedade de nível superior
+    console.log('Frontend: onRoomJoined - roundStarted:', data.roundStarted);
+    console.log('Frontend: onRoomJoined - roundEnded:', data.roundEnded);
+    console.log('Frontend: onRoomJoined - currentLetter:', data.letter);
+
+    setIsInRoom(true);
+    setRoom(data.room || ''); 
+    setNickname(data.player?.nickname || ''); 
+    setPlayersInRoom(data.players || []); 
+    setIsAdmin(data.player?.isCreator || false); // Use data.player.isCreator para a fonte definitiva
+    setRoomThemes(data.config?.themes || []); 
+    setRoomDuration(data.config?.duration || 60); 
+    setRoomError(null);
+    setResetRoundFlag(false);
+    setRoundStarted(data.roundStarted || false); // Garante que roundStarted é setado
+    setRoundEnded(data.roundEnded || false);     // Garante que roundEnded é setado
+    setStopClickedByMe(data.stopClickedByMe || false); // Garante que stopClickedByMe é setado
+    setLetter(data.letter || null); // Garante que letter é setado
+    clearLocalCountdown();
+    setIsRoomSaved(data.isSaved || false); // Use data.isSaved para a fonte definitiva
+    console.log("onRoomJoined: isRoomSaved set to", data.isSaved || false); 
+    
+    localStorage.setItem('roomId', data.room || '');
+    localStorage.setItem('nickname', data.player?.nickname || '');
+  }, [clearLocalCountdown]);
+
+  const onRoomError = useCallback((errorData) => {
+    console.error("Frontend: 'room_error' recebido. Dados:", errorData);
+    setRoomError(errorData.message);
+    
+    if (justSavedRef.current) {
+        console.log("Frontend: 'room_error' recebido APÓS tentativa de salvamento. Ignorando na UI.");
+        setRoomError(null); 
+    } else {
+        setAlert({ isVisible: true, message: errorData.message, type: 'error' });
+        // Lógica para sair da sala
+        if (!isRoomSaved) { 
+            setIsInRoom(false);
+            setRoom(''); 
+            setNickname(''); 
+            setPlayersInRoom([]);
+            setIsAdmin(false);
+            setRoomThemes([]);
+            setRoomDuration(60);
+            setLetter(null);
+            setRoundStarted(false);
+            setRoundEnded(false);
+            setStopClickedByMe(false);
+            setIsRoomSaved(false);
+            localStorage.removeItem('roomId');
+            localStorage.removeItem('nickname');
+            localStorage.removeItem('userId');
+        }
+    }
+  }, [clearLocalCountdown, isRoomSaved, justSavedRef, room]); 
+
+  const onPlayersUpdated = useCallback((players) => {
+    setPlayersInRoom(players || []); 
+    const myPlayer = (players || []).find(p => p.userId === userId); 
+    if (myPlayer) {
+      setIsAdmin(myPlayer.isCreator || false); 
+      console.log(`Frontend: onPlayersUpdated - userId ${userId} isCreator: ${myPlayer.isCreator}`);
+    }
+  }, [userId]);
+
+  const onRoundStarted = useCallback((data) => {
+    console.log('Frontend: onRoundStarted recebido. Dados:', data);
+    setLetter(data.letter || null); 
+    setRoundStarted(true);
+    setRoundEnded(false);
+    setStopClickedByMe(false);
+    setResetRoundFlag(false);
+    clearLocalCountdown();
+  }, [clearLocalCountdown]);
+
+  const onRoundStartCountdown = useCallback((data) => {
+    console.log('Frontend: onRoundStartCountdown recebido. Dados:', data);
+    setLetter(null);
+    setRoundStarted(false);
+    setRoundEnded(false);
+    setStopClickedByMe(false);
+    setResetRoundFlag(false);
+    startLocalCountdown(data.initialCountdown || 0, () => { 
+      socket.emit("start_game_actual", { room });
+    });
+  }, [startLocalCountdown, room]);
+
+  const onRoundEnded = useCallback(() => {
+    console.log('Frontend: onRoundEnded recebido.');
+    setRoundEnded(true);
+    setRoundStarted(false);
+    setLetter(null);
+    setStopClickedByMe(false);
+    clearLocalCountdown();
+  }, [clearLocalCountdown]);
+
+  const onRoomResetAck = useCallback(() => {
+    console.log('Frontend: onRoomResetAck recebido.');
+    setResetRoundFlag(true);
+    setRoundStarted(false);
+    setRoundEnded(false);
+    setLetter(null);
+    setStopClickedByMe(false);
+    clearLocalCountdown();
+  }, [clearLocalCountdown]);
+
+  // --- Efeito Único para Listeners do Socket.IO ---
   useEffect(() => {
     function onConnect() {
       console.log('Socket Conectado! ID:', socket.id);
       setIsConnected(true);
-      // Após conectar, se houver dados de sala salvos, tenta reingressar
       const savedRoomId = localStorage.getItem('roomId');
       const savedNickname = localStorage.getItem('nickname');
-      const currentUserId = localStorage.getItem('userId'); // Garante que temos o userId
+      const savedUserId = localStorage.getItem('userId'); 
 
-      if (savedRoomId && savedNickname && currentUserId) {
-        console.log(`Socket reconectado. Tentando reingressar na sala ${savedRoomId}...`);
+      if (savedRoomId && savedNickname && savedUserId && !isInRoom) { 
+        console.log(`Socket reconectado. Tentando reingressar na sala ${savedRoomId} com userId ${savedUserId}...`);
         socket.emit('rejoin_room', {
           roomId: savedRoomId,
           nickname: savedNickname,
-          userId: currentUserId,
+          userId: savedUserId, 
         });
       }
     }
@@ -158,241 +407,66 @@ function App() {
     function onDisconnect() {
       console.log('Socket Desconectado!');
       setIsConnected(false);
-      // NÃO limpe o estado da sala aqui, pois pode ser uma desconexão temporária.
-      // A lógica de `rejoin_room` no `onConnect` lidará com o restabelecimento
-      // do estado da sala, ou `rejoin_room_fail` irá limpá-lo se necessário.
+      setAlert({ isVisible: true, message: "Desconectado do servidor. Tentando reconectar...", type: 'error' });
     }
 
     function onConnectError(err) {
       console.error("Erro de Conexão do Socket:", err.message, err);
       setIsConnected(false);
       setRoomError("Não foi possível conectar ao servidor. Verifique sua internet ou tente novamente mais tarde.");
+      setAlert({ isVisible: true, message: "Erro de conexão! Verifique sua internet.", type: 'error' });
     }
-
+    
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('connect_error', onConnectError);
 
-    setIsConnected(socket.connected);
-    console.log("Estado Inicial do Socket:", socket.connected ? "Conectado" : "Desconectado");
-
-    return () => {
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
-      socket.off('connect_error', onConnectError);
-    };
-  }, []); // Sem dependências, executa apenas uma vez na montagem
-
-
-  useEffect(() => {
-    function onRoomJoined(data) {
-      setIsInRoom(true);
-      setRoom(data.room);
-      setNickname(data.player.nickname); // Define o nickname a partir dos dados do jogador
-      setUserId(data.player.userId); // Define o userId a partir dos dados do jogador
-      setPlayersInRoom(data.players);
-      setIsAdmin(data.isCreator); // Backend envia 'isCreator'
-      setRoomThemes(data.config.themes || []); // Temas estão em data.config
-      setRoomDuration(data.config.duration || 60); // Duração está em data.config
-      setRoomError(null);
-      setResetRoundFlag(false);
-      setRoundStarted(false);
-      setRoundEnded(false);
-      setStopClickedByMe(false);
-      setLetter(null);
-      clearLocalCountdown();
-      console.log("Entrou na sala:", data.room, "Jogadores:", data.players, "É Admin:", data.isCreator, "Temas:", data.config.themes, "Duração:", data.config.duration);
-
-      // --- SALVAR NO LOCAL STORAGE AO ENTRAR NA SALA COM SUCESSO ---
-      localStorage.setItem('roomId', data.room);
-      localStorage.setItem('nickname', data.player.nickname);
-      localStorage.setItem('userId', data.player.userId); // Garante que o userId também seja salvo
-    }
-
-    function onRoomError(message) {
-      setRoomError(message);
-      setIsInRoom(false);
-      setPlayersInRoom([]);
-      setIsAdmin(false);
-      setRoomThemes([]);
-      setRoundStarted(false);
-      setRoundEnded(false);
-      setStopClickedByMe(false);
-      setLetter(null);
-      clearLocalCountdown();
-      // Em caso de erro na sala, limpa o local storage, pois a sala pode ser inválida
-      localStorage.removeItem('roomId');
-      localStorage.removeItem('nickname');
-      // Mantém o userId, pois é um ID do lado do cliente
-    }
-
-    function onPlayersUpdated(players) {
-      setPlayersInRoom(players);
-      const myPlayer = players.find(p => p.userId === userId); // Encontra pelo userId
-      if (myPlayer) {
-        setIsAdmin(myPlayer.isCreator); // Usa 'isCreator'
-      }
-      console.log("Jogadores atualizados:", players);
-    }
-
-    function onRoomConfigUpdated(config) {
-      if (config.themes) {
-        setRoomThemes(config.themes);
-        console.log("Temas da sala atualizados:", config.themes);
-      }
-      if (config.duration) {
-        setRoomDuration(config.duration);
-        console.log("Duração da sala atualizada:", config.duration);
-      }
-      if (config.currentLetter) { // Se a letra for enviada na config (ex: após reset)
-        setLetter(config.currentLetter);
-      }
-    }
-
-    function onRoundStarted(data) {
-      setLetter(data.letter);
-      setRoundStarted(true);
-      setRoundEnded(false);
-      setStopClickedByMe(false);
-      setResetRoundFlag(false);
-      clearLocalCountdown();
-      console.log("Rodada iniciada! Letra:", data.letter);
-    }
-
-    // Listener para iniciar a contagem regressiva no frontend
-    function onRoundStartCountdown(data) {
-        console.log("Recebido round_start_countdown:", data.initialCountdown);
-        setLetter(null); // Limpa a letra enquanto aguarda o countdown
-        setRoundStarted(false);
-        setRoundEnded(false);
-        setStopClickedByMe(false);
-        setResetRoundFlag(false);
-        startLocalCountdown(data.initialCountdown, () => {
-            console.log("Contagem regressiva local finalizada! Emitindo start_game_actual.");
-            // Após a contagem regressiva local, avisamos o backend para iniciar a rodada de fato
-            socket.emit("start_game_actual", { room });
-        });
-    }
-
-    function onRoundEnded() { // Consolidado: atende tanto a STOP quanto a tempo
-      setRoundEnded(true);
-      setRoundStarted(false);
-      setLetter(null);
-      setStopClickedByMe(false);
-      clearLocalCountdown(); // Garante que qualquer countdown pendente seja limpo
-      console.log("Rodada encerrada (por STOP ou tempo).");
-    }
-
-    function onRoomResetAck() {
-      console.log("Evento: room_reset_ack recebido. Preparando para nova rodada.");
-      setResetRoundFlag(true); // Isso fará com que o GameBoard resete.
-      setRoundStarted(false);
-      setRoundEnded(false);
-      setLetter(null);
-      setStopClickedByMe(false);
-      clearLocalCountdown();
-      // Não limpa temas e duração aqui, pois eles podem ter sido atualizados e já virão no room_config
-    }
-
-    socket.on('room_joined', onRoomJoined);
-    socket.on('room_error', onRoomError);
-    socket.on('players_update', onPlayersUpdated);
+    socket.on('rejoin_room_success', onRejoinRoomSuccess);
+    socket.on('rejoin_room_fail', onRejoinRoomFail);
     socket.on('room_config', onRoomConfigUpdated);
+    socket.on('changes_saved_success', onChangesSavedSuccess);
+    socket.on('room_joined', onRoomJoined);
+    socket.on('room_error', onRoomError); 
+    socket.on('players_update', onPlayersUpdated);
     socket.on('round_started', onRoundStarted);
     socket.on('round_start_countdown', onRoundStartCountdown);
     socket.on('round_ended', onRoundEnded);
     socket.on('room_reset_ack', onRoomResetAck);
 
+    setIsConnected(socket.connected);
+
     return () => {
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('connect_error', onConnectError);
+
+      socket.off('rejoin_room_success', onRejoinRoomSuccess);
+      socket.off('rejoin_room_fail', onRejoinRoomFail);
+      socket.off('room_config', onRoomConfigUpdated);
+      socket.off('changes_saved_success', onChangesSavedSuccess);
       socket.off('room_joined', onRoomJoined);
       socket.off('room_error', onRoomError);
       socket.off('players_update', onPlayersUpdated);
-      socket.off('room_config', onRoomConfigUpdated);
       socket.off('round_started', onRoundStarted);
       socket.off('round_start_countdown', onRoundStartCountdown);
       socket.off('round_ended', onRoundEnded);
       socket.off('room_reset_ack', onRoomResetAck);
     };
-  }, [userId, clearLocalCountdown, startLocalCountdown, room]);
+  }, [
+    userId, isInRoom, 
+    onRejoinRoomSuccess, onRejoinRoomFail, onRoomSavedSuccess, onRoomConfigUpdated, onChangesSavedSuccess,
+    onRoomJoined, onRoomError, onPlayersUpdated, onRoundStarted, onRoundStartCountdown, onRoundEnded, onRoomResetAck
+  ]);
 
-  // Handler para juntar ou criar uma sala
-  const handleJoinOrCreateRoom = (roomName, playerNickname) => {
-    if (socket.connected) {
-      setNickname(playerNickname);
-      setRoom(roomName);
-      setRoomError(null); // Limpa qualquer erro anterior
-      console.log(`Tentando entrar/criar sala: ${roomName} com nickname: ${playerNickname}`);
-      socket.emit('join_room', { userId, room: roomName, nickname: playerNickname });
-    } else {
-      setRoomError("Conexão com o servidor não estabelecida. Tente novamente.");
-      console.error("Socket não conectado, não é possível entrar na sala.");
-    }
-  };
+  useEffect(() => {
+    console.log("App.jsx Render Update: isRoomSaved is now", isRoomSaved);
+    console.log("App.jsx Render Update: isAdmin is now", isAdmin);
+    console.log("App.jsx Render Update: roundStarted is now", roundStarted);
+    console.log("App.jsx Render Update: roundEnded is now", roundEnded);
+    console.log("App.jsx Render Update: currentLetter is now", letter);
+    console.log("App.jsx Render Update: alert is now", alert);
+  }, [isRoomSaved, isAdmin, roundStarted, roundEnded, letter, alert]);
 
-  // Handler para atualizar temas e notificar o backend
-  const handleChangeRoomThemes = useCallback((newThemes) => {
-    if (isAdmin && room) {
-      setRoomThemes(newThemes);
-      socket.emit('update_config', { room, themes: newThemes });
-      console.log("Emitindo update_config (themes) para sala:", room, newThemes);
-    }
-  }, [isAdmin, room]);
-
-  // Handler para atualizar duração e notificar o backend
-  const handleChangeRoomDuration = useCallback((newDuration) => {
-    if (isAdmin && room) {
-      setRoomDuration(newDuration);
-      socket.emit('update_config', { room, duration: newDuration });
-      console.log("Emitindo update_config (duration) para sala:", room, newDuration);
-    }
-  }, [isAdmin, room]);
-
-
-  const handleStartRound = () => {
-    if (isAdmin && !roundStarted && !roundEnded && !countdown) {
-      socket.emit('start_round', { room }); // Inicia o countdown no backend
-      console.log("Emitindo start_round (para iniciar contagem regressiva) para sala:", room);
-    }
-  };
-
-  const handleStopRound = () => {
-    if (roundStarted && !roundEnded && !stopClickedByMe) {
-      socket.emit('stop_round');
-      setStopClickedByMe(true);
-      console.log("STOP clicado!");
-    }
-  };
-
-  const handleLeaveRoom = () => {
-    if (isInRoom) {
-      socket.emit('leave_room'); // Informa o backend que o usuário está saindo
-      // Limpa o estado local para voltar para a tela inicial
-      setIsInRoom(false);
-      setRoom('');
-      setNickname('');
-      setPlayersInRoom([]);
-      setIsAdmin(false);
-      setRoomThemes([]);
-      setRoomDuration(60);
-      setLetter(null);
-      setRoundStarted(false);
-      setRoundEnded(false);
-      setStopClickedByMe(false);
-      setRoomError(null);
-      setResetRoundFlag(false);
-      clearLocalCountdown();
-      // --- LIMPAR LOCAL STORAGE AO SAIR DA SALA ---
-      localStorage.removeItem('roomId');
-      localStorage.removeItem('nickname');
-      localStorage.removeItem('userId'); // Também limpa o userId se o usuário sair explicitamente
-      console.log("Saiu da sala (estado do frontend limpo e localStorage removido).");
-    }
-  };
-
-  const onResetRound = () => {
-    console.log("onResetRound chamado do GameBoard. Definindo resetRoundFlag para false.");
-    setResetRoundFlag(false);
-  };
 
   if (!isInRoom) {
     return (
@@ -424,6 +498,10 @@ function App() {
         handleStopRound={handleStopRound}
         handleLeaveRoom={handleLeaveRoom}
         onResetRound={onResetRound}
+        isRoomSaved={isRoomSaved}
+        handleSaveRoom={handleSaveRoom}
+        alertState={alert}
+        setAlertState={setAlert}
       />
     );
   }

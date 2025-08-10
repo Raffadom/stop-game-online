@@ -284,7 +284,7 @@ io.on("connection", (socket) => {
       let player = players[userId];
       if (!player) {
         console.log(`[Backend Log - rejoin_room] Jogador ${userId} não encontrado. Criando novo jogador.`);
-        player = { id: socket.id, nickname, room: roomId, userId, isCreator: roomConfig.creatorId === userId };
+        player = { id: socket.id, nickname, room: roomId, userId, isCreator: false };
         players[userId] = player;
       } else {
         player.id = socket.id;
@@ -292,7 +292,18 @@ io.on("connection", (socket) => {
         player.room = roomId;
       }
 
+      // Determinar se o usuário é administrador
       isCreator = roomConfig.creatorId === userId;
+      if (!isCreator) {
+        // Verificar se o criador original está presente na sala
+        const creatorPresent = Object.values(players).some(p => p.room === roomId && p.userId === roomConfig.creatorId);
+        if (!creatorPresent && Object.values(players).filter(p => p.room === roomId).length === 0) {
+          isCreator = true; // Primeiro jogador a entrar na sala salva
+          roomConfig.creatorId = userId; // Atualizar creatorId
+          console.log(`[Backend Log - rejoin_room] Nenhum criador presente. Definindo ${userId} como criador da sala ${roomId}.`);
+        }
+      }
+
       player.isCreator = isCreator;
 
       socket.userId = userId;
@@ -368,6 +379,13 @@ io.on("connection", (socket) => {
         currentRoomConfig = { ...configFromFirestore, isSaved: true };
         roomIsSaved = true;
         isCreator = currentRoomConfig.creatorId === userId;
+        // Verificar se o criador original está presente
+        const creatorPresent = Object.values(players).some(p => p.room === room && p.userId === currentRoomConfig.creatorId);
+        if (!isCreator && !creatorPresent && Object.values(players).filter(p => p.room === room).length === 0) {
+          isCreator = true; // Primeiro jogador a entrar na sala salva
+          currentRoomConfig.creatorId = userId; // Atualizar creatorId
+          console.log(`[Backend Log - join_room] Nenhum criador presente. Definindo ${userId} como criador da sala ${room}.`);
+        }
         console.log(`[Backend Log - join_room] Sala ${room} encontrada no Firestore. isSaved: true, creatorId: ${currentRoomConfig.creatorId}.`);
       } else if (roomConfigs[room]) {
         currentRoomConfig = { ...roomConfigs[room] };

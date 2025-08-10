@@ -2,8 +2,6 @@ import { useEffect, useState, useRef } from "react";
 import { socket } from "../socket";
 import Modal from "./Modal"; // Certifique-se de que o caminho para o Modal está correto
 
-// O componente Alert foi movido para Room.jsx, não é mais importado aqui.
-
 export default function GameBoard({
   roundStarted,
   roundEnded,
@@ -14,33 +12,34 @@ export default function GameBoard({
   userId,
   roomThemes,
   setRoomThemes,
-  setRoomDuration, // Mantido, mas a lógica de auto-salvar está em App.jsx
+  setRoomDuration,
   stopClickedByMe,
   handleStopRound,
-  room, // Mantido para enviar em eventos socket
-  // As props isRoomSaved, handleSaveRoom, alertState, setAlertState foram removidas daqui
+  room,
 }) {
   const maxThemes = 10;
   const [answers, setAnswers] = useState([]);
   const [newThemeInput, setNewThemeInput] = useState("");
-
   const [totalPoints, setTotalPoints] = useState(null);
   const [showResults, setShowResults] = useState(false);
   const [finalRanking, setFinalRanking] = useState(null);
-
   const [showModal, setShowModal] = useState(false);
   const [validationData, setValidationData] = useState(null);
   const [canReveal, setCanReveal] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const [currentAnswerValidatedInModal, setCurrentAnswerValidatedInModal] = useState(false);
-
   const [playerOverallScore, setPlayerOverallScore] = useState(0);
 
-  // Ref para as respostas atuais para serem usadas em callbacks do socket
   const answersRef = useRef(answers);
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
+
+  useEffect(() => {
+    if (!showModal) {
+      setValidationData(null); // Limpa validationData quando o modal não está visível
+    }
+  }, [showModal]);
 
   useEffect(() => {
     const themesChanged = JSON.stringify(roomThemes) !== JSON.stringify(answers.map((a) => a.theme));
@@ -122,7 +121,16 @@ export default function GameBoard({
     };
 
     const handleAnswerValidated = ({ current }) => {
-      console.log("✅ answer_validated recebido:", current);
+      console.log("✅ answer_validated recebido:", {
+        playerId: current.playerId,
+        playerNickname: current.playerNickname,
+        theme: current.theme,
+        answer: current.answer,
+        points: current.points,
+        validated: current.validated,
+        isLastAnswerOfTheme: current.isLastAnswerOfTheme,
+        isLastAnswerOfGame: current.isLastAnswerOfGame,
+      });
       setAnswers((prevAnswers) =>
         prevAnswers.map((a, i) =>
           i === current.themeIndex
@@ -164,7 +172,7 @@ export default function GameBoard({
       socket.off("answer_validated", handleAnswerValidated);
       socket.off("all_answers_validated", handleAllAnswersValidated);
     };
-  }, [userId, roundStarted, answers, validationData]);
+  }, [userId, roundStarted, answers]);
 
   const handleAnswerInputChange = (index, value) => {
     const newAnswers = [...answers];
@@ -204,10 +212,14 @@ export default function GameBoard({
   };
 
   const handleValidation = (isValid) => {
-    console.log("handleValidation chamado. Enviando validate_answer com valid:", isValid, "para sala:", room);
-    socket.emit("validate_answer", { valid: isValid, room });
+    if (!validationData || !validationData.answer || validationData.answer.trim() === "") {
+      console.log("🚫 handleValidation: Resposta vazia, forçando valid=false para sala:", room, "Resposta:", validationData?.answer);
+      socket.emit("validate_answer", { valid: false, room });
+    } else {
+      console.log("handleValidation: Enviando validate_answer com valid:", isValid, "para sala:", room, "Resposta:", validationData.answer);
+      socket.emit("validate_answer", { valid: isValid, room });
+    }
   };
-  const handleNext = () => socket.emit("next_validation");
 
   console.log(
     "GameBoard Render: ",
@@ -228,8 +240,6 @@ export default function GameBoard({
 
   return (
     <div className="w-full h-full flex flex-col space-y-6">
-      {/* O componente de alerta foi movido para Room.jsx, não é mais renderizado aqui. */}
-
       {/* Letra da Rodada (visível apenas quando a rodada está ativa) */}
       {letter && roundStarted && !roundEnded && (
         <div className="text-center text-3xl font-bold mb-4 text-blue-700 select-none dark:text-blue-400">
@@ -276,7 +286,6 @@ export default function GameBoard({
               </span>
             ))}
           </div>
-          {/* O botão Salvar Sala foi movido para o Room.jsx */}
         </div>
       )}
 
@@ -311,6 +320,11 @@ export default function GameBoard({
                     }}
                   >
                     Pontos: {answerItem.points}
+                    {answerItem.points === 50 && (
+                      <span className="ml-2 text-yellow-600 italic">
+                        (Resposta Duplicada)
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -433,6 +447,11 @@ export default function GameBoard({
                     >
                       {validationData.points}
                     </span>
+                    {validationData.points === 50 && validationData.validated && (
+                      <span className="ml-2 text-yellow-600 italic">
+                        (Resposta Duplicada)
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -441,6 +460,7 @@ export default function GameBoard({
                     <button
                       onClick={() => handleValidation(true)}
                       className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg shadow-md transition-colors duration-200"
+                      disabled={!validationData.answer || validationData.answer.trim() === ""}
                     >
                       Validar
                     </button>
@@ -450,33 +470,6 @@ export default function GameBoard({
                     >
                       Anular
                     </button>
-                  </div>
-                )}
-
-                {canReveal && validationData.validated && (
-                  <div className="flex justify-center mt-6">
-                    {validationData.isLastAnswerOfGame ? (
-                      <button
-                        onClick={handleNext}
-                        className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg shadow-md transition-colors duration-200"
-                      >
-                        Finalizar Correção
-                      </button>
-                    ) : validationData.isLastAnswerOfTheme ? (
-                      <button
-                        onClick={handleNext}
-                        className="bg-orange-600 hover:bg-orange-700 text-white px-6 py-2 rounded-lg shadow-md transition-colors duration-200"
-                      >
-                        Próximo Tema
-                      </button>
-                    ) : (
-                      <button
-                        onClick={handleNext}
-                        className="bg-gray-800 hover:bg-gray-700 text-white px-6 py-2 rounded-lg shadow-md transition-colors duration-200"
-                      >
-                        Próxima Resposta
-                      </button>
-                    )}
                   </div>
                 )}
               </>

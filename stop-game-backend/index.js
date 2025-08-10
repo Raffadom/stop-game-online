@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: '../.env' });
 
 const express = require("express");
 const http = require("http");
@@ -69,6 +69,16 @@ const roomsCollectionRef = db
   .collection('public')
   .doc('data')
   .collection('rooms');
+
+// Função de normalização de respostas
+const normalizeAnswer = (answer) => {
+  if (!answer || typeof answer !== 'string') return '';
+  return answer
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+};
 
 // ------------------------
 // Sanitização e Wrappers
@@ -264,7 +274,6 @@ io.on("connection", (socket) => {
       let roomConfig = null;
       let isCreator = false;
 
-      // Tentar carregar a configuração da sala do Firestore
       let configFromFirestore = await getRoomConfigFromFirestore(roomId);
       if (configFromFirestore) {
         roomConfig = { ...configFromFirestore, isSaved: true };
@@ -280,7 +289,6 @@ io.on("connection", (socket) => {
 
       roomConfigs[roomId] = roomConfig;
 
-      // Verificar se o jogador existe no mapa players
       let player = players[userId];
       if (!player) {
         console.log(`[Backend Log - rejoin_room] Jogador ${userId} não encontrado. Criando novo jogador.`);
@@ -292,14 +300,12 @@ io.on("connection", (socket) => {
         player.room = roomId;
       }
 
-      // Determinar se o usuário é administrador
       isCreator = roomConfig.creatorId === userId;
       if (!isCreator) {
-        // Verificar se o criador original está presente na sala
         const creatorPresent = Object.values(players).some(p => p.room === roomId && p.userId === roomConfig.creatorId);
         if (!creatorPresent && Object.values(players).filter(p => p.room === roomId).length === 0) {
-          isCreator = true; // Primeiro jogador a entrar na sala salva
-          roomConfig.creatorId = userId; // Atualizar creatorId
+          isCreator = true;
+          roomConfig.creatorId = userId;
           console.log(`[Backend Log - rejoin_room] Nenhum criador presente. Definindo ${userId} como criador da sala ${roomId}.`);
         }
       }
@@ -379,11 +385,10 @@ io.on("connection", (socket) => {
         currentRoomConfig = { ...configFromFirestore, isSaved: true };
         roomIsSaved = true;
         isCreator = currentRoomConfig.creatorId === userId;
-        // Verificar se o criador original está presente
         const creatorPresent = Object.values(players).some(p => p.room === room && p.userId === currentRoomConfig.creatorId);
         if (!isCreator && !creatorPresent && Object.values(players).filter(p => p.room === room).length === 0) {
-          isCreator = true; // Primeiro jogador a entrar na sala salva
-          currentRoomConfig.creatorId = userId; // Atualizar creatorId
+          isCreator = true;
+          currentRoomConfig.creatorId = userId;
           console.log(`[Backend Log - join_room] Nenhum criador presente. Definindo ${userId} como criador da sala ${room}.`);
         }
         console.log(`[Backend Log - join_room] Sala ${room} encontrada no Firestore. isSaved: true, creatorId: ${currentRoomConfig.creatorId}.`);
@@ -480,6 +485,7 @@ io.on("connection", (socket) => {
           config.isSaved = true;
           emitRoomConfig(room, config);
           socket.emit("room_saved_success", { room, roomName });
+          io.to(room).emit("room_saved_success", { room, roomName }); // Notifica todos na sala
           console.log(`[Socket.io] Sala ${room} salva manualmente por ${userId}. isSaved: ${config.isSaved}`);
         } else {
           socket.emit("room_error", { message: "Erro ao salvar a sala." });
@@ -751,7 +757,30 @@ io.on("connection", (socket) => {
       const currentPlayer = roomsAnswers[room][validationState.currentPlayerIndex];
       const currentAnswer = currentPlayer.answers[validationState.currentThemeIndex];
       currentAnswer.validated = true;
-      currentAnswer.points = valid ? 10 : 0;
+
+      // Regra 1: Resposta vazia sempre recebe 0 pontos
+      if (!currentAnswer.answer || currentAnswer.answer.trim() === "") {
+        currentAnswer.points = 0;
+        console.log(`[Socket.io] Resposta vazia detectada para ${currentPlayer.nickname}, tema ${currentAnswer.theme}. Pontos: 0`);
+      } else if (valid) {
+        // Regra 2: Verificar duplicatas com normalização, excluindo a própria resposta
+        const currentTheme = currentAnswer.theme;
+        const normalizedCurrentAnswer = normalizeAnswer(currentAnswer.answer);
+        const allAnswersForTheme = roomsAnswers[room]
+          .filter(player => player.id !== currentPlayer.id) // Exclui o jogador atual
+          .flatMap(player => player.answers)
+          .filter(answer => answer.theme === currentTheme && answer.answer && answer.answer.trim() !== "");
+        const isDuplicate = allAnswersForTheme.some(answer => 
+          normalizeAnswer(answer.answer) === normalizedCurrentAnswer
+        );
+        
+        // Regra 3: 100 pontos para respostas únicas válidas, 50 para duplicadas
+        currentAnswer.points = isDuplicate ? 50 : 100;
+        console.log(`[Socket.io] Resposta ${currentAnswer.answer} (normalizada: ${normalizedCurrentAnswer}) para tema ${currentTheme}. Duplicada: ${isDuplicate}, Pontos: ${currentAnswer.points}`);
+      } else {
+        currentAnswer.points = 0; // Resposta inválida recebe 0 pontos
+        console.log(`[Socket.io] Resposta inválida para ${currentPlayer.nickname}, tema ${currentAnswer.theme}. Pontos: 0`);
+      }
 
       if (!roomOverallScores[room]) roomOverallScores[room] = {};
       if (!roomOverallScores[room][currentPlayer.id]) roomOverallScores[room][currentPlayer.id] = 0;
@@ -765,6 +794,7 @@ io.on("connection", (socket) => {
         answer: currentAnswer.answer,
         points: currentAnswer.points,
         validated: currentAnswer.validated,
+        isDuplicate: currentAnswer.points === 50,
       });
 
       io.to(room).emit("answer_validated", {
@@ -782,7 +812,7 @@ io.on("connection", (socket) => {
       });
 
       if (validationState.currentPlayerIndex === roomsAnswers[room].length - 1 && validationState.currentThemeIndex === roomConfigs[room].themes.length - 1) {
-        console.log(`[Socket.io] Todas as respostas validadas para a sala ${room}`);
+        console.log(`[Socket.io] Todas as respostas validadas para sala ${room}`);
         const roundScores = roomsAnswers[room].map(player => ({
           userId: player.id,
           nickname: player.nickname,

@@ -10,6 +10,9 @@ function App() {
     if (!currentId) {
       currentId = uuidv4();
       localStorage.setItem('userId', currentId);
+      console.log("Frontend: Novo userId gerado e salvo:", currentId);
+    } else {
+      console.log("Frontend: Usando userId existente:", currentId);
     }
     return currentId;
   });
@@ -19,11 +22,11 @@ function App() {
   const [isConnected, setIsConnected] = useState(socket.connected);
   const [isInRoom, setIsInRoom] = useState(false);
   const [roomError, setRoomError] = useState(null);
-  const [playersInRoom, setPlayersInRoom] = useState([]); 
+  const [playersInRoom, setPlayersInRoom] = useState([]);
   const [isAdmin, setIsAdmin] = useState(false);
 
   // Estados relacionados ao jogo
-  const [roomThemes, setRoomThemes] = useState([]); 
+  const [roomThemes, setRoomThemes] = useState([]);
   const [roomDuration, setRoomDuration] = useState(60);
   const [letter, setLetter] = useState(null);
   const [roundStarted, setRoundStarted] = useState(false);
@@ -178,7 +181,7 @@ function App() {
       clearLocalCountdown();
       localStorage.removeItem('roomId');
       localStorage.removeItem('nickname');
-      localStorage.removeItem('userId');
+      // userId NÃO é removido aqui, pois queremos que ele persista
       setAlert({ isVisible: true, message: "Você saiu da sala.", type: 'info' });
       console.log("Saiu da sala, estado limpo.");
     }
@@ -192,12 +195,16 @@ function App() {
   // --- Funções de Listener ---
 
   const onRejoinRoomSuccess = useCallback((data) => {
-    console.log('Reingresso bem-sucedido:', data);
+    console.log('[App] Reingresso bem-sucedido. Dados recebidos:', data);
     setIsInRoom(true);
     setRoom(data.room?.roomId || '');
     setNickname(data.player?.nickname || '');
     setPlayersInRoom(data.room?.players || []);
-    setIsAdmin(data.player?.isCreator || false);
+    // Log antes de atualizar isAdmin
+    console.log(`[App] onRejoinRoomSuccess: userId ${userId}, isAdmin ANTES: ${isAdmin}, data.player.isCreator: ${data.player?.isCreator}`);
+    setIsAdmin(data.player?.isCreator || false); // Atualiza isAdmin
+    console.log(`[App] onRejoinRoomSuccess: isAdmin DEPOIS: ${data.player?.isCreator || false}`);
+
     setRoomThemes(data.room?.config?.themes || []);
     setRoomDuration(data.room?.config?.duration || 60);
     setLetter(data.room?.currentLetter || null);
@@ -208,10 +215,10 @@ function App() {
     setRoomError(null);
     clearLocalCountdown();
     setAlert({ isVisible: true, message: `Reconectado à sala ${data.room?.roomId || ''}!`, type: 'success' });
-  }, [clearLocalCountdown, userId]);
+  }, [clearLocalCountdown, userId, isAdmin]); // Incluído isAdmin para logs
 
   const onRejoinRoomFail = useCallback(() => {
-    console.log('Reingresso falhou. Limpando estado.');
+    console.log('[App] Reingresso falhou. Limpando estado.');
     setIsInRoom(false);
     setRoom('');
     setNickname('');
@@ -228,62 +235,80 @@ function App() {
     clearLocalCountdown();
     localStorage.removeItem('roomId');
     localStorage.removeItem('nickname');
-    localStorage.removeItem('userId');
     setAlert({ isVisible: true, message: "Não foi possível reentrar na sala.", type: 'error' });
   }, [clearLocalCountdown]);
 
   const onRoomSavedSuccess = useCallback((data) => {
-    console.log("room_saved_success recebido:", data);
+    console.log("[App] room_saved_success recebido:", data);
     setIsRoomSaved(true);
     setAlert({ isVisible: true, message: `A sala ${data.room} foi salva!`, type: 'success' });
   }, []);
 
   const onRoomConfigUpdated = useCallback((config) => {
-    console.log("room_config recebido:", config);
+    console.log("[App] room_config recebido. Configuração:", config);
     if (!config || typeof config !== 'object') {
-      console.warn("room_config inválido:", config);
+      console.warn("[App] room_config inválido:", config);
       return;
     }
+    
     if (config.themes && JSON.stringify(config.themes) !== JSON.stringify(roomThemes)) {
       setRoomThemes(config.themes);
       if (isRoomSaved) {
         setIsRoomSaved(false);
-        console.log("Temas alterados, isRoomSaved setado para FALSE.");
+        console.log("[App] Temas alterados via room_config, isRoomSaved setado para FALSE.");
       }
     }
     if (config.duration !== undefined && config.duration !== roomDuration) {
       setRoomDuration(config.duration);
       if (isRoomSaved) {
         setIsRoomSaved(false);
-        console.log("Duração alterada, isRoomSaved setado para FALSE.");
+        console.log("[App] Duração alterada via room_config, isRoomSaved setado para FALSE.");
       }
     }
+
+    // Aprimoramento: Garante que isAdmin seja atualizado com base no creatorId da config da sala
+    if (config.creatorId !== undefined) {
+      const newIsAdmin = config.creatorId === userId;
+      // Log antes de atualizar isAdmin
+      console.log(`[App] onRoomConfigUpdated: userId ${userId}, isAdmin ANTES: ${isAdmin}, newIsAdmin (from config): ${newIsAdmin}`);
+      if (newIsAdmin !== isAdmin) {
+        setIsAdmin(newIsAdmin);
+        console.log(`[App] onRoomConfigUpdated: isAdmin DEPOIS: ${newIsAdmin}`);
+      } else {
+        console.log(`[App] onRoomConfigUpdated: isAdmin status inalterado: ${newIsAdmin}`);
+      }
+    }
+
     if (config.isSaved !== undefined && config.isSaved !== isRoomSaved) {
       setIsRoomSaved(config.isSaved);
-      console.log("isRoomSaved atualizado via room_config:", config.isSaved);
+      console.log("[App] isRoomSaved atualizado via room_config:", config.isSaved);
     }
     if (config.currentLetter !== undefined) setLetter(config.currentLetter);
     if (config.roundActive !== undefined) setRoundStarted(config.roundActive);
     if (config.roundEnded !== undefined) setRoundEnded(config.roundEnded);
     if (config.stopClickedByMe !== undefined) {
       setStopClickedByMe(config.stopClickedByMe === userId);
-      console.log("stopClickedByMe atualizado via room_config:", config.stopClickedByMe === userId);
+      console.log("[App] stopClickedByMe atualizado via room_config:", config.stopClickedByMe === userId);
     }
-  }, [roomThemes, roomDuration, isRoomSaved, userId]);
+  }, [roomThemes, roomDuration, isRoomSaved, userId, isAdmin]);
 
   const onChangesSavedSuccess = useCallback(() => {
-    console.log("changes_saved_success recebido.");
+    console.log("[App] changes_saved_success recebido.");
     setAlert({ isVisible: true, message: 'Alterações salvas automaticamente!', type: 'success' });
     setIsRoomSaved(true);
   }, []);
 
   const onRoomJoined = useCallback((data) => {
-    console.log("room_joined recebido:", data);
+    console.log("[App] room_joined recebido. Dados:", data);
     setIsInRoom(true);
     setRoom(data.room || '');
     setNickname(data.player?.nickname || '');
     setPlayersInRoom(data.players || []);
-    setIsAdmin(data.player?.isCreator || false);
+    // Log antes de atualizar isAdmin
+    console.log(`[App] onRoomJoined: userId ${userId}, isAdmin ANTES: ${isAdmin}, data.player.isCreator: ${data.player?.isCreator}`);
+    setIsAdmin(data.player?.isCreator || false); // Atualiza isAdmin
+    console.log(`[App] onRoomJoined: isAdmin DEPOIS: ${data.player?.isCreator || false}`);
+
     setRoomThemes(data.config?.themes || []);
     setRoomDuration(data.config?.duration || 60);
     setRoomError(null);
@@ -297,12 +322,12 @@ function App() {
     localStorage.setItem('roomId', data.room || '');
     localStorage.setItem('nickname', data.player?.nickname || '');
     setAlert({ isVisible: true, message: `Entrou na sala ${data.room}!`, type: 'success' });
-  }, [clearLocalCountdown, userId]);
+  }, [clearLocalCountdown, userId, isAdmin]);
 
   const onRoomError = useCallback((errorData) => {
-    console.error("room_error recebido:", errorData);
+    console.error("[App] room_error recebido:", errorData);
     if (justSavedRef.current) {
-      console.log("Ignorando room_error após save_room.");
+      console.log("[App] Ignorando room_error após save_room (salvamento em andamento).");
       setRoomError(null);
       return;
     }
@@ -323,21 +348,30 @@ function App() {
       setIsRoomSaved(false);
       localStorage.removeItem('roomId');
       localStorage.removeItem('nickname');
-      localStorage.removeItem('userId');
     }
   }, [isRoomSaved]);
 
   const onPlayersUpdated = useCallback((players) => {
+    console.log("[App] onPlayersUpdated recebido. Lista de jogadores:", players);
     setPlayersInRoom(players || []);
     const myPlayer = (players || []).find(p => p.userId === userId);
     if (myPlayer) {
-      setIsAdmin(myPlayer.isCreator || false);
-      console.log(`onPlayersUpdated: userId ${userId} isCreator: ${myPlayer.isCreator}`);
+      const newIsAdminStatus = myPlayer.isCreator || false;
+      // Log antes de atualizar isAdmin
+      console.log(`[App] onPlayersUpdated: userId ${userId}, isAdmin ANTES: ${isAdmin}, myPlayer.isCreator: ${myPlayer.isCreator}`);
+      if (newIsAdminStatus !== isAdmin) {
+        setIsAdmin(newIsAdminStatus);
+        console.log(`[App] onPlayersUpdated: isAdmin DEPOIS: ${newIsAdminStatus}`);
+      } else {
+        console.log(`[App] onPlayersUpdated: isAdmin status inalterado: ${newIsAdminStatus}`);
+      }
+    } else {
+      console.warn(`[App] onPlayersUpdated: Meu jogador (${userId}) NÃO encontrado na lista de jogadores atualizada!`);
     }
-  }, [userId]);
+  }, [userId, isAdmin]);
 
   const onRoundStarted = useCallback((data) => {
-    console.log('onRoundStarted recebido:', data);
+    console.log('[App] onRoundStarted recebido:', data);
     setLetter(data.letter || null);
     setRoundStarted(true);
     setRoundEnded(false);
@@ -347,7 +381,7 @@ function App() {
   }, [clearLocalCountdown]);
 
   const onRoundStartCountdown = useCallback((data) => {
-    console.log('onRoundStartCountdown recebido:', data);
+    console.log('[App] onRoundStartCountdown recebido:', data);
     setLetter(null);
     setRoundStarted(false);
     setRoundEnded(false);
@@ -359,7 +393,7 @@ function App() {
   }, [startLocalCountdown, room]);
 
   const onRoundEnded = useCallback(() => {
-    console.log('onRoundEnded recebido.');
+    console.log('[App] onRoundEnded recebido.');
     setRoundEnded(true);
     setRoundStarted(false);
     setLetter(null);
@@ -368,7 +402,7 @@ function App() {
   }, [clearLocalCountdown]);
 
   const onRoomResetAck = useCallback(() => {
-    console.log('onRoomResetAck recebido.');
+    console.log('[App] onRoomResetAck recebido.');
     setResetRoundFlag(true);
     setRoundStarted(false);
     setRoundEnded(false);
@@ -377,16 +411,15 @@ function App() {
     clearLocalCountdown();
   }, [clearLocalCountdown]);
 
-  // --- Efeito Único para Listeners do Socket.IO ---
   useEffect(() => {
     function onConnect() {
-      console.log('Socket Conectado! ID:', socket.id);
+      console.log('[App] Socket Conectado! ID:', socket.id);
       setIsConnected(true);
       const savedRoomId = localStorage.getItem('roomId');
       const savedNickname = localStorage.getItem('nickname');
       const savedUserId = localStorage.getItem('userId');
       if (savedRoomId && savedNickname && savedUserId && !isInRoom) {
-        console.log(`Tentando reingressar na sala ${savedRoomId} com userId ${savedUserId}...`);
+        console.log(`[App] Tentando reingressar na sala ${savedRoomId} com userId ${savedUserId}...`);
         socket.emit('rejoin_room', {
           roomId: savedRoomId,
           nickname: savedNickname,
@@ -396,13 +429,13 @@ function App() {
     }
 
     function onDisconnect() {
-      console.log('Socket Desconectado!');
+      console.log('[App] Socket Desconectado!');
       setIsConnected(false);
       setAlert({ isVisible: true, message: "Desconectado do servidor. Tentando reconectar...", type: 'error' });
     }
 
     function onConnectError(err) {
-      console.error("Erro de Conexão do Socket:", err.message);
+      console.error("[App] Erro de Conexão do Socket:", err.message);
       setIsConnected(false);
       setRoomError("Não foi possível conectar ao servidor. Verifique sua internet.");
       setAlert({ isVisible: true, message: "Erro de conexão! Verifique sua internet.", type: 'error' });
@@ -450,9 +483,9 @@ function App() {
   ]);
 
   useEffect(() => {
-    console.log("App.jsx Render Update:", {
+    console.log("App.jsx Render Update (State Values):", {
       isRoomSaved,
-      isAdmin,
+      isAdmin, // Observe este valor
       roundStarted,
       roundEnded,
       currentLetter: letter,
@@ -475,7 +508,7 @@ function App() {
         room={room}
         userId={userId}
         playersInRoom={playersInRoom}
-        isAdmin={isAdmin}
+        isAdmin={isAdmin} // Este prop é crucial para o GameBoard/Room
         roomThemes={roomThemes}
         setRoomThemes={handleChangeRoomThemes}
         roomDuration={roomDuration}

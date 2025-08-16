@@ -356,6 +356,7 @@ io.on("connection", (socket) => {
             }
 
             let roomConfig = null;
+            let configChanged = false; // Flag para rastrear se a config mudou e precisa ser salva/emitida
 
             // Tenta carregar do Firestore primeiro, depois da memória
             let configFromFirestore = await getRoomConfigFromFirestore(roomId);
@@ -369,6 +370,16 @@ io.on("connection", (socket) => {
                 console.log(`[Backend Log - rejoin_room] Reingresso falhou: Sala ${roomId} não encontrada em memória nem no Firestore.`);
                 socket.emit('rejoin_room_fail');
                 return;
+            }
+
+            // --- Lógica para resetar estado de rodada se a sala estiver salva e finalizada ---
+            if (roomConfig.isSaved && (roomConfig.roundEnded || roomConfig.roundActive || roomConfig.currentLetter || roomConfig.stopClickedByMe)) {
+                console.log(`[Backend Log - rejoin_room] Resetando estado de rodada para sala salva ${roomId}.`);
+                roomConfig.roundActive = false;
+                roomConfig.roundEnded = false;
+                roomConfig.currentLetter = null;
+                roomConfig.stopClickedByMe = null;
+                configChanged = true; // Marcar que a configuração foi alterada
             }
 
             roomConfigs[roomId] = roomConfig; // Garante que a config mais recente esteja em memória
@@ -386,44 +397,40 @@ io.on("connection", (socket) => {
             }
 
             // --- Lógica Revisada de Adoção/Reafirmação do Admin ---
-            // Verifica se o creatorId existe no roomConfig e se o admin original está *realmente* ativo na sala
-            // Filtrar `players` para os jogadores *já* conhecidos e ativos na sala (excluindo o atual socket.userId)
             const activePlayersExcludingCurrent = Object.values(players).filter(p => p.room === roomId && p.userId !== userId);
             const originalCreatorStillActive = roomConfig.creatorId && activePlayersExcludingCurrent.some(p => p.userId === roomConfig.creatorId);
 
             if (roomConfig.creatorId === userId) {
-                // Caso 1: O usuário que está reingressando é o criador registrado.
                 player.isCreator = true;
                 console.log(`[Backend Log - ADMIN ASSIGN] ${nickname} (${userId}) é o criador registrado para ${roomId}. Status: Admin.`);
             } else if (!roomConfig.creatorId || (!originalCreatorStillActive && activePlayersExcludingCurrent.length === 0)) {
-                // Caso 2: Sala não tem creatorId (nova ou dados antigos) OU
-                //         O criador registrado NÃO está ativo E não há outros jogadores ativos na sala (sala órfã).
-                //         Neste cenário, o usuário atual se torna o novo admin (adota a sala).
                 roomConfig.creatorId = userId;
                 player.isCreator = true;
                 console.log(`[Backend Log - ADMIN ASSIGN] Sala ${roomId} órfã ou sem criador. ${nickname} (${userId}) é o novo criador.`);
-                await saveRoomConfigToFirestore(roomId, roomConfig); // Persiste esta mudança!
+                configChanged = true; // Marcar que a configuração foi alterada
             } else {
-                // Caso 3: O creatorId existe, o usuário atual não é o criador registrado,
-                //         E o criador original ainda está ativo ou há outros jogadores na sala.
                 player.isCreator = false;
                 console.log(`[Backend Log - ADMIN ASSIGN] ${nickname} (${userId}) NÃO é o criador de ${roomId}. Criador: ${roomConfig.creatorId}.`);
             }
             // --- Fim da Lógica Revisada de Adoção/Reafirmação do Admin ---
 
-
             socket.userId = userId;
             socket.room = roomId;
             socket.join(roomId);
 
-            // Reconstruir a lista de playersInRoom com os status isCreator atualizados
+            // Se a configuração foi alterada (reset ou novo admin), salve no Firestore e emita
+            if (configChanged) {
+                await saveRoomConfigToFirestore(roomId, roomConfig);
+            }
+            emitRoomConfig(roomId, roomConfig); // Sempre emite a config mais recente
+
             const playersInRoom = Object.values(players)
                 .filter((p) => p.room === roomId)
                 .map((p) => ({
                     id: p.id,
                     nickname: p.nickname,
                     userId: p.userId,
-                    isCreator: p.isCreator, // Usa o isCreator atualizado do player
+                    isCreator: p.isCreator,
                 }));
 
             const currentRoomData = {
@@ -433,20 +440,20 @@ io.on("connection", (socket) => {
                     themes: roomConfig.themes || ["País", "Cidade", "Nome", "Marca", "Cor", "Animal"],
                     duration: roomConfig.duration || 60,
                     creatorId: roomConfig.creatorId,
-                    currentLetter: roomConfig.currentLetter || null,
-                    roundActive: roomConfig.roundActive || false,
-                    roundEnded: roomConfig.roundEnded || false,
-                    stopClickedByMe: roomConfig.stopClickedByMe || null,
-                    isSaved: roomConfig.isSaved || false,
+                    currentLetter: roomConfig.currentLetter,
+                    roundActive: roomConfig.roundActive,
+                    roundEnded: roomConfig.roundEnded,
+                    stopClickedByMe: roomConfig.stopClickedByMe,
+                    isSaved: roomConfig.isSaved,
                 },
                 currentLetter: roomConfig.currentLetter,
                 roundStarted: roomConfig.roundActive,
-                roundEnded: roomConfig.roundEnded || false,
-                stopClickedByMe: stopCallers[roomId] === userId,
-                isSaved: roomConfig.isSaved || false,
+                roundEnded: roomConfig.roundEnded,
+                stopClickedByMe: roomConfig.stopClickedByMe === userId, // Ajustado para refletir o novo stopClickedByMe
+                isSaved: roomConfig.isSaved,
             };
 
-            console.log(`[Backend Log - rejoin_room] Reingresso bem-sucedido para ${nickname} (${userId}) na sala ${roomId}. isCreator: ${player.isCreator}, isSaved: ${roomConfig.isSaved}`);
+            console.log(`[Backend Log - rejoin_room] Reingresso bem-sucedido para ${nickname} (${userId}) na sala ${roomId}. isCreator: ${player.isCreator}, isSaved: ${roomConfig.isSaved}, roundEnded: ${roomConfig.roundEnded}`);
             socket.emit('rejoin_room_success', {
                 room: currentRoomData,
                 player: {
@@ -456,11 +463,8 @@ io.on("connection", (socket) => {
                 }
             });
 
-            // Envia a lista de jogadores atualizada para todos na sala
             io.to(roomId).emit("players_update", playersInRoom);
-            // Também garante que a configuração da sala seja enviada para todos após atualização do creatorId
-            emitRoomConfig(roomId, roomConfig);
-
+            
         } catch (error) {
             console.error(`[Socket.io] Erro em rejoin_room para userId ${userId}, sala ${roomId}:`, error);
             socket.emit('room_error', { message: 'Erro ao reentrar na sala.' });
@@ -483,6 +487,7 @@ io.on("connection", (socket) => {
 
             let roomIsSaved = false;
             let currentRoomConfig = null;
+            let configChanged = false; // Flag para rastrear se a config mudou e precisa ser salva/emitida
 
             // Tenta carregar do Firestore primeiro, depois da memória
             let configFromFirestore = await getRoomConfigFromFirestore(room);
@@ -490,6 +495,17 @@ io.on("connection", (socket) => {
                 currentRoomConfig = { ...configFromFirestore, isSaved: true };
                 roomIsSaved = true;
                 console.log(`[Backend Log - join_room] Sala ${room} encontrada no Firestore. isSaved: true, creatorId: ${currentRoomConfig.creatorId}.`);
+
+                // --- Lógica para resetar estado de rodada se a sala estiver salva e finalizada ---
+                if (currentRoomConfig.isSaved && (currentRoomConfig.roundEnded || currentRoomConfig.roundActive || currentRoomConfig.currentLetter || currentRoomConfig.stopClickedByMe)) {
+                    console.log(`[Backend Log - join_room] Resetando estado de rodada para sala salva ${room}.`);
+                    currentRoomConfig.roundActive = false;
+                    currentRoomConfig.roundEnded = false;
+                    currentRoomConfig.currentLetter = null;
+                    currentRoomConfig.stopClickedByMe = null;
+                    configChanged = true; // Marcar que a configuração foi alterada
+                }
+
             } else if (roomConfigs[room]) {
                 currentRoomConfig = { ...roomConfigs[room] };
                 roomIsSaved = currentRoomConfig.isSaved || false;
@@ -508,6 +524,7 @@ io.on("connection", (socket) => {
                     isSaved: false,
                 };
                 console.log(`[Backend Log - join_room] Nova sala ${room} criada em memória. isSaved: false, creatorId: ${userId}.`);
+                configChanged = true; // Uma sala nova sempre representa uma "mudança"
             }
 
             roomConfigs[room] = currentRoomConfig; // Garante que a config mais recente esteja em memória
@@ -529,24 +546,25 @@ io.on("connection", (socket) => {
             const originalCreatorStillActive = currentRoomConfig.creatorId && activePlayersExcludingCurrent.some(p => p.userId === currentRoomConfig.creatorId);
 
             if (currentRoomConfig.creatorId === userId) {
-                // Caso 1: O usuário que está entrando é o criador registrado.
                 player.isCreator = true;
                 console.log(`[Backend Log - ADMIN ASSIGN] ${nickname} (${userId}) é o criador registrado para ${room}. Status: Admin.`);
             } else if (!currentRoomConfig.creatorId || (!originalCreatorStillActive && activePlayersExcludingCurrent.length === 0)) {
-                // Caso 2: Sala não tem creatorId (nova ou dados antigos) OU
-                //         O criador registrado NÃO está ativo E não há outros jogadores ativos na sala (sala órfã).
-                //         Neste cenário, o usuário atual se torna o novo admin (adota a sala).
                 currentRoomConfig.creatorId = userId;
                 player.isCreator = true;
                 console.log(`[Backend Log - ADMIN ASSIGN] Sala ${room} órfã ou sem criador. ${nickname} (${userId}) é o novo criador.`);
-                await saveRoomConfigToFirestore(room, currentRoomConfig); // Persiste esta mudança!
+                configChanged = true; // Marcar que a configuração foi alterada
             } else {
-                // Caso 3: O creatorId existe, o usuário atual não é o criador registrado,
-                //         E o criador original ainda está ativo ou há outros jogadores na sala.
                 player.isCreator = false;
                 console.log(`[Backend Log - ADMIN ASSIGN] ${nickname} (${userId}) NÃO é o criador de ${room}. Criador: ${currentRoomConfig.creatorId}.`);
             }
             // --- Fim da Lógica Revisada de Adoção/Reafirmação do Admin ---
+
+            // Se a configuração foi alterada (reset ou novo admin), salve no Firestore
+            if (configChanged) {
+                await saveRoomConfigToFirestore(room, currentRoomConfig);
+            }
+            // Sempre emite a config mais recente para todos na sala
+            emitRoomConfig(room, currentRoomConfig); 
 
             // Reconstruir a lista de playersInRoom com os status isCreator atualizados
             const playersInRoom = Object.values(players)
@@ -555,18 +573,17 @@ io.on("connection", (socket) => {
                     id: p.id,
                     nickname: p.nickname,
                     userId: p.userId,
-                    isCreator: p.isCreator, // Usa o isCreator atualizado do player
+                    isCreator: p.isCreator,
                 }));
 
             io.to(room).emit("players_update", playersInRoom);
-            emitRoomConfig(room, roomConfigs[room]); // Garante que a configuração mais recente seja enviada
-
+            
             const playerData = players[userId];
             const payload = {
                 room: room,
                 players: playersInRoom,
                 isCreator: playerData.isCreator,
-                config: sanitizeRoomConfig(roomConfigs[room]),
+                config: sanitizeRoomConfig(currentRoomConfig),
                 player: {
                     userId: playerData.userId,
                     nickname: playerData.nickname,
@@ -574,7 +591,7 @@ io.on("connection", (socket) => {
                 },
                 isSaved: roomIsSaved,
             };
-            console.log(`[Backend Log - join_room] Conectado à sala ${room}. Jogador ${playerData.nickname} (${playerData.userId}). É criador: ${playerData.isCreator}. Sala salva: ${roomIsSaved}.`);
+            console.log(`[Backend Log - join_room] Conectado à sala ${room}. Jogador ${playerData.nickname} (${playerData.userId}). É criador: ${playerData.isCreator}. Sala salva: ${roomIsSaved}, roundEnded: ${currentRoomConfig.roundEnded}.`);
             socket.emit("room_joined", payload);
         } catch (error) {
             console.error(`[Socket.io] Erro em join_room para userId ${userId}, sala ${room}:`, error);

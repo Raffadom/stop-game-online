@@ -12,6 +12,7 @@ const Alert = ({ message, type, isVisible, onClose }) => {
       case 'success':
         return 'bg-green-500';
       case 'warning':
+      case 'info':
         return 'bg-yellow-500';
       case 'error':
         return 'bg-red-500';
@@ -54,15 +55,14 @@ export default function Room({
   onResetRound,
   isRoomSaved,
   handleSaveRoom,
+  alertState,
+  setAlertState,
 }) {
   const [showCopiedMessage, setShowCopiedMessage] = useState(false);
   const [theme, setTheme] = useState(() => {
     const savedTheme = localStorage.getItem('theme');
     return savedTheme ? savedTheme : 'light';
   });
-
-  // Estado para os alerts
-  const [alertState, setAlertState] = useState({ isVisible: false, message: '', type: '' });
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -74,7 +74,6 @@ export default function Room({
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // Efeito para esconder o alert após 3 segundos
   useEffect(() => {
     if (alertState.isVisible) {
       const timer = setTimeout(() => {
@@ -82,7 +81,12 @@ export default function Room({
       }, 3000);
       return () => clearTimeout(timer);
     }
-  }, [alertState]); // A dependência setAlertState é desnecessária se não for modificada
+  }, [alertState, setAlertState]);
+
+  // Removemos o console.log de depuração visual do useEffect aqui
+  // useEffect(() => {
+  //   console.log(`[Room Component - Render Update] userId: ${userId}, isAdmin: ${isAdmin}, roundStarted: ${roundStarted}, roundEnded: ${roundEnded}, countdown: ${countdown}`);
+  // }, [isAdmin, roundStarted, roundEnded, countdown, userId]);
 
   const toggleTheme = () => {
     setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
@@ -90,16 +94,22 @@ export default function Room({
 
   const handleShareRoomLink = () => {
     const roomLink = `${window.location.origin}/room/${room}`;
-    navigator.clipboard.writeText(roomLink)
-      .then(() => {
-        setShowCopiedMessage(true);
-        setTimeout(() => {
-          setShowCopiedMessage(false);
-        }, 2000);
-      })
-      .catch((err) => {
-        console.error('Erro ao copiar o link: ', err);
-      });
+    const textArea = document.createElement("textarea");
+    textArea.value = roomLink;
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      setShowCopiedMessage(true);
+      setTimeout(() => {
+        setShowCopiedMessage(false);
+      }, 2000);
+    } catch (err) {
+      console.error('Erro ao copiar o link: ', err);
+      setAlertState({ isVisible: true, message: "Não foi possível copiar o link automaticamente. Por favor, copie-o manualmente.", type: 'warning' });
+    }
+    document.body.removeChild(textArea);
   };
 
   const handleSaveRoomWithDetails = () => {
@@ -112,6 +122,13 @@ export default function Room({
   
   const saveButtonText = isRoomSaved ? '✅ Sala Salva' : '💾 Salvar Sala';
   const saveButtonColor = isRoomSaved ? 'bg-green-500 hover:bg-green-600' : 'bg-yellow-500 hover:bg-yellow-600';
+
+  // As condições de renderização voltaram ao normal, sem as mensagens de debug
+  const isSaveButtonVisible = isAdmin && !roundStarted && !roundEnded;
+  const isStartRoundControlsVisible = isAdmin && !roundStarted && !roundEnded && countdown === null;
+
+  // A função getAdminButtonHiddenReason não é mais necessária, pois as mensagens foram removidas
+  // const getAdminButtonHiddenReason = () => { ... };
 
   return (
     <div className="flex flex-col min-h-screen max-w-5xl mx-auto px-4 py-6 space-y-8 relative">
@@ -156,7 +173,7 @@ export default function Room({
               Link da sala copiado!
             </span>
           )}
-          {isAdmin && !roundStarted && !roundEnded && (
+          {isSaveButtonVisible && ( // Condição para botão Salvar Sala
             <button
               onClick={handleSaveRoomWithDetails}
               className={`px-3 py-1 text-white rounded-md text-sm transition-colors shadow font-semibold ${saveButtonColor}`}
@@ -203,7 +220,7 @@ export default function Room({
 
       {/* Controles da Rodada */}
       <div className="bg-white p-6 rounded-xl shadow w-full flex flex-col items-center space-y-4 dark:bg-gray-800 dark:text-gray-100">
-        {isAdmin && !roundStarted && !roundEnded && countdown === null && (
+        {isStartRoundControlsVisible && ( // Condição para controles de admin (Duração e Iniciar)
           <div className="flex flex-col sm:flex-row items-center gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="duration-input" className="text-gray-700 font-medium dark:text-gray-300">Duração (segundos):</label>
@@ -227,6 +244,7 @@ export default function Room({
           </div>
         )}
 
+        {/* Estes controles não são de admin, então mantêm a lógica original */}
         {roundStarted && countdown === null && (
           <>
             <Timer duration={roomDuration} />

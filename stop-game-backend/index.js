@@ -258,7 +258,7 @@ function initiateValidationAfterDelay(room) {
 // Eventos Socket.IO
 // ------------------------
 io.on("connection", (socket) => {
-    // Nota: socket.userId é temporário aqui. O userId real vem do cliente.
+    // Nota: socket.userId é temporário aqui. O userId real vem do cliente nas chamadas de join/rejoin.
     socket.userId = generateUserId();
     socket.room = null;
     console.log(`[Socket.io] Nova conexão. Socket ID: ${socket.id}, userId: ${socket.userId}`);
@@ -388,16 +388,16 @@ io.on("connection", (socket) => {
             // --- Lógica Revisada de Adoção/Reafirmação do Admin ---
             // Verifica se o creatorId existe no roomConfig e se o admin original está *realmente* ativo na sala
             // Filtrar `players` para os jogadores *já* conhecidos e ativos na sala (excluindo o atual socket.userId)
-            const otherActivePlayersInRoom = Object.values(players).filter(p => p.room === roomId && p.userId !== userId);
-            const originalCreatorStillActive = roomConfig.creatorId && otherActivePlayersInRoom.some(p => p.userId === roomConfig.creatorId);
+            const activePlayersExcludingCurrent = Object.values(players).filter(p => p.room === roomId && p.userId !== userId);
+            const originalCreatorStillActive = roomConfig.creatorId && activePlayersExcludingCurrent.some(p => p.userId === roomConfig.creatorId);
 
             if (roomConfig.creatorId === userId) {
                 // Caso 1: O usuário que está reingressando é o criador registrado.
                 player.isCreator = true;
                 console.log(`[Backend Log - ADMIN ASSIGN] ${nickname} (${userId}) é o criador registrado para ${roomId}. Status: Admin.`);
-            } else if (!roomConfig.creatorId || (!originalCreatorStillActive && otherActivePlayersInRoom.length === 0)) {
+            } else if (!roomConfig.creatorId || (!originalCreatorStillActive && activePlayersExcludingCurrent.length === 0)) {
                 // Caso 2: Sala não tem creatorId (nova ou dados antigos) OU
-                //         O criador registrado NÃO está ativo E não há outros jogadores na sala (sala órfã).
+                //         O criador registrado NÃO está ativo E não há outros jogadores ativos na sala (sala órfã).
                 //         Neste cenário, o usuário atual se torna o novo admin (adota a sala).
                 roomConfig.creatorId = userId;
                 player.isCreator = true;
@@ -456,7 +456,11 @@ io.on("connection", (socket) => {
                 }
             });
 
+            // Envia a lista de jogadores atualizada para todos na sala
             io.to(roomId).emit("players_update", playersInRoom);
+            // Também garante que a configuração da sala seja enviada para todos após atualização do creatorId
+            emitRoomConfig(roomId, roomConfig);
+
         } catch (error) {
             console.error(`[Socket.io] Erro em rejoin_room para userId ${userId}, sala ${roomId}:`, error);
             socket.emit('room_error', { message: 'Erro ao reentrar na sala.' });
@@ -521,16 +525,16 @@ io.on("connection", (socket) => {
             }
 
             // --- Lógica Revisada de Adoção/Reafirmação do Admin (Idêntica ao rejoin_room) ---
-            const otherActivePlayersInRoom = Object.values(players).filter(p => p.room === room && p.userId !== userId);
-            const originalCreatorStillActive = currentRoomConfig.creatorId && otherActivePlayersInRoom.some(p => p.userId === currentRoomConfig.creatorId);
+            const activePlayersExcludingCurrent = Object.values(players).filter(p => p.room === room && p.userId !== userId);
+            const originalCreatorStillActive = currentRoomConfig.creatorId && activePlayersExcludingCurrent.some(p => p.userId === currentRoomConfig.creatorId);
 
             if (currentRoomConfig.creatorId === userId) {
                 // Caso 1: O usuário que está entrando é o criador registrado.
                 player.isCreator = true;
                 console.log(`[Backend Log - ADMIN ASSIGN] ${nickname} (${userId}) é o criador registrado para ${room}. Status: Admin.`);
-            } else if (!currentRoomConfig.creatorId || (!originalCreatorStillActive && otherActivePlayersInRoom.length === 0)) {
+            } else if (!currentRoomConfig.creatorId || (!originalCreatorStillActive && activePlayersExcludingCurrent.length === 0)) {
                 // Caso 2: Sala não tem creatorId (nova ou dados antigos) OU
-                //         O criador registrado NÃO está ativo E não há outros jogadores na sala (sala órfã).
+                //         O criador registrado NÃO está ativo E não há outros jogadores ativos na sala (sala órfã).
                 //         Neste cenário, o usuário atual se torna o novo admin (adota a sala).
                 currentRoomConfig.creatorId = userId;
                 player.isCreator = true;
@@ -555,7 +559,7 @@ io.on("connection", (socket) => {
                 }));
 
             io.to(room).emit("players_update", playersInRoom);
-            emitRoomConfig(room, roomConfigs[room]);
+            emitRoomConfig(room, roomConfigs[room]); // Garante que a configuração mais recente seja enviada
 
             const playerData = players[userId];
             const payload = {

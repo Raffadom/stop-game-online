@@ -861,9 +861,7 @@ io.on("connection", (socket) => {
         if (!currentAnswer || typeof currentAnswer !== 'object') { socket.emit("room_error", { message: "Erro interno ao validar resposta." }); return; }
 
         const currentThemeIndex = validationState.currentThemeIndex;
-        const currentTheme = currentAnswer.theme;
         const normalizedCurrentAnswer = normalizeAnswer(currentAnswer.answer || "");
-
         const previousPointsForCurrentAnswer = currentAnswer.points || 0;
         currentAnswer.validated = true;
 
@@ -877,8 +875,9 @@ io.on("connection", (socket) => {
             currentAnswer.points = 0;
         }
 
-        // 2. Após validar, garanta simetria das duplicatas
-        if (currentAnswer.points > 0) {
+        // 2. DUPLICIDADE — sempre garanta simetria após validar/anular
+        // Só aplica lógica de duplicidade se a resposta foi validada e não está vazia
+        if (valid && currentAnswer.points > 0) {
             // Liste todos os outros jogadores já validados, com resposta igual, e pontos > 0
             const duplicates = roomsAnswers[room].filter(player => {
                 if (player.id === currentPlayer.id) return false;
@@ -901,6 +900,39 @@ io.on("connection", (socket) => {
                         if (!roomOverallScores[room][dup.id]) roomOverallScores[room][dup.id] = 0;
                         roomOverallScores[room][dup.id] = roomOverallScores[room][dup.id] - (dupAnswer.points - 50);
                         dupAnswer.points = 50;
+                    }
+                }
+            }
+        } else if (!valid || currentAnswer.points === 0) {
+            // Se ANULOU ou zerou, pode ser que algum duplicado tenha virado único (desduplicação)
+            if (currentAnswer.answer && currentAnswer.answer.trim() !== "") {
+                // Procure todos os outros que eram duplicados desta exata resposta
+                const others = roomsAnswers[room].filter(player => player.id !== currentPlayer.id);
+                for (const other of others) {
+                    const otherAnswer = other.answers[currentThemeIndex];
+                    if (
+                        otherAnswer &&
+                        otherAnswer.validated &&
+                        otherAnswer.points === 50 && // Só se era duplicata
+                        normalizeAnswer(otherAnswer.answer || "") === normalizedCurrentAnswer
+                    ) {
+                        // Veja se agora ele ficou único (ninguém mais igual com pontos > 0)
+                        const stillDuplicates = roomsAnswers[room].filter(p2 => {
+                            if (p2.id === other.id) return false;
+                            const ans2 = p2.answers[currentThemeIndex];
+                            return (
+                                ans2 &&
+                                ans2.validated &&
+                                ans2.points > 0 &&
+                                normalizeAnswer(ans2.answer || "") === normalizeAnswer(otherAnswer.answer || "")
+                            );
+                        });
+                        if (stillDuplicates.length === 0) {
+                            // Agora virou resposta única: volta para 100
+                            if (!roomOverallScores[room][other.id]) roomOverallScores[room][other.id] = 0;
+                            roomOverallScores[room][other.id] = roomOverallScores[room][other.id] - 50 + 100;
+                            otherAnswer.points = 100;
+                        }
                     }
                 }
             }
@@ -984,87 +1016,6 @@ io.on("connection", (socket) => {
         socket.emit("room_error", { message: "Erro interno ao validar resposta." });
     }
 });
-
-// ... [continua igual ao seu arquivo até o final] ...
-    socket.on("submit_answers", (answers) => {
-        try {
-            const userId = socket.userId;
-            const room = socket.room;
-            if (!userId) {
-                console.warn(`[Socket.io] submit_answers: userId é null. Autenticação/conexão de socket inválida.`);
-                socket.emit("room_error", { message: "Erro: Usuário não identificado." });
-                return;
-            }
-            if (!room) {
-                console.warn(`[Socket.io] submit_answers: Sala indefinida para ${userId}.`);
-                socket.emit("room_error", { message: "Erro: Sala não especificada." });
-                return;
-            }
-            const nickname = players[userId]?.nickname;
-            const config = roomConfigs[room];
-
-            if (!config) {
-                console.log(`[Socket.io] 🚫 Respostas submetidas: Configuração da sala ${room} não encontrada para ${nickname}.`);
-                socket.emit("room_error", { message: "Erro: Sala não encontrada." });
-                return;
-            }
-
-            if (!roomsAnswers[room]) roomsAnswers[room] = [];
-
-            const idx = roomsAnswers[room].findIndex((p) => p.id === userId);
-            if (idx >= 0) {
-                roomsAnswers[room][idx].answers = answers;
-            } else {
-                roomsAnswers[room].push({ id: userId, nickname, answers });
-            }
-            console.log(`[Socket.io] ✅ Respostas submetidas por ${nickname} na sala ${room}.`);
-        } catch (error) {
-            console.error(`[Socket.io] Erro em submit_answers para userId ${socket.userId}, sala ${socket.room}:`, error);
-            socket.emit("room_error", { message: "Erro interno ao submeter respostas." });
-        }
-    });
-
-    socket.on("reset_round_data", async () => {
-        try {
-            const room = socket.room;
-            const userId = socket.userId;
-            if (!userId) {
-                console.warn(`[Socket.io] reset_round_data: userId é null. Autenticação/conexão de socket inválida.`);
-                socket.emit("room_error", { message: "Erro: Usuário não identificado." });
-                return;
-            }
-            if (!room) {
-                socket.emit("room_error", { message: "Erro: Sala não especificada." });
-                return;
-            }
-            if (roomConfigs[room] && roomConfigs[room].creatorId === userId) {
-                roomsAnswers[room] = [];
-                stopCallers[room] = null;
-                validationStates[room] = null;
-                if (roomConfigs[room].roundTimerId) {
-                    clearTimeout(roomConfigs[room].roundTimerId);
-                    roomConfigs[room].roundTimerId = null;
-                }
-                if (roomConfigs[room].countdownTimerId) {
-                    clearTimeout(roomConfigs[room].countdownTimerId);
-                    roomConfigs[room].countdownTimerId = null;
-                }
-                roomConfigs[room].currentLetter = null;
-                roomConfigs[room].roundActive = false;
-                roomConfigs[room].roundEnded = false;
-                roomConfigs[room].stopClickedByMe = null;
-                await saveRoomConfigToFirestore(room, roomConfigs[room]);
-                io.to(room).emit("room_reset_ack");
-                emitRoomConfig(room, roomConfigs[room]);
-                console.log(`[Backend Log - reset_round_data] Rodada resetada para sala ${room}. roundActive: ${roomConfigs[room].roundActive}, roundEnded: ${roomConfigs[room].roundEnded}`);
-            } else {
-                socket.emit("room_error", { message: "Erro: Somente o administrador pode resetar a rodada." });
-            }
-        } catch (error) {
-            console.error(`[Socket.io] Erro em reset_round_data para sala ${socket.room}:`, error);
-            socket.emit("room_error", { message: "Erro interno ao resetar a rodada." });
-        }
-    });
 
     socket.on("end_game", async () => {
         try {

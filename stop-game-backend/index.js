@@ -887,24 +887,19 @@ socket.on("validate_answer", ({ valid, room }) => {
     try {
         const userId = socket.userId;
         if (!userId) {
-            console.warn(`[Socket.io] validate_answer: userId é null. Autenticação/conexão de socket inválida.`);
             socket.emit("room_error", { message: "Erro: Usuário não identificado." });
             return;
         }
-        console.log(`[Socket.io] Recebido validate_answer. Socket ID: ${socket.id}, Sala: ${room}, Valid: ${valid}`);
         if (!room || !roomConfigs[room]) {
-            console.warn(`[Socket.io] validate_answer: Sala ${room} indefinida ou não encontrada.`);
             socket.emit("room_error", { message: "Erro: Sala não encontrada." });
             return;
         }
         const validationState = validationStates[room];
         if (!validationState) {
-            console.warn(`[Socket.io] validate_answer: Estado de validação não encontrado para sala ${room}.`);
             socket.emit("room_error", { message: "Erro: Estado de validação não encontrado." });
             return;
         }
         if (validationState.validatorId !== userId) {
-            console.warn(`[Socket.io] validate_answer: Socket ${socket.id} (userId: ${userId}) não é o juiz atual para sala ${room}.`);
             socket.emit("room_error", { message: "Erro: Apenas o juiz pode validar respostas." });
             return;
         }
@@ -912,23 +907,8 @@ socket.on("validate_answer", ({ valid, room }) => {
         const currentPlayer = roomsAnswers[room][validationState.currentPlayerIndex];
         const currentAnswer = currentPlayer.answers[validationState.currentThemeIndex];
 
-        // Debug logs (pode remover depois de testar)
-        console.log("====== DEBUG VALIDATE_ANSWER ======");
-        console.log("ROOM:", room);
-        console.log("RESPONDENDO:", currentPlayer.nickname, "userId:", currentPlayer.id);
-        console.log("TEMA:", currentAnswer.theme);
-        console.log("RESPOSTA:", currentAnswer.answer);
-        console.log("VALIDADA?:", valid);
-        console.log("ESTADO ATUAL DAS RESPOSTAS:");
-        roomsAnswers[room].forEach(p => {
-          p.answers.forEach(a => {
-            console.log(`[${p.nickname}] ${a.theme}: "${a.answer}" | validated: ${a.validated} | points: ${a.points}`);
-          });
-        });
-        console.log("===================================");
-
+        // Certifica-se de que currentAnswer existe e é um objeto válido
         if (!currentAnswer || typeof currentAnswer !== 'object' || currentAnswer === null) {
-            console.error(`[Socket.io] Erro em validate_answer: currentAnswer inválida/não encontrada para sala ${room}, jogador ${currentPlayer?.nickname}, temaIndex ${validationState.currentThemeIndex}.`);
             socket.emit("room_error", { message: "Erro interno ao validar resposta: resposta ausente." });
             return;
         }
@@ -937,12 +917,13 @@ socket.on("validate_answer", ({ valid, room }) => {
         currentAnswer.validated = true;
         const currentTheme = currentAnswer.theme;
 
-        // Lógica corrigida:
+        // Lógica robusta de duplicidade e pontuação:
         if (!currentAnswer.answer || currentAnswer.answer.trim() === "") {
             currentAnswer.points = 0;
-            console.log(`[Socket.io] Resposta vazia detectada para ${currentPlayer.nickname}, tema ${currentTheme}. Pontos: 0`);
         } else if (valid) {
             const normalizedCurrentAnswer = normalizeAnswer(currentAnswer.answer);
+
+            // Procura duplicata válida para este tema
             let duplicateFound = false;
             for (const otherPlayer of roomsAnswers[room]) {
                 if (otherPlayer.id === currentPlayer.id) continue;
@@ -956,7 +937,6 @@ socket.on("validate_answer", ({ valid, room }) => {
                     duplicateFound = true;
                     // Se o outro já está com 100, rebaixa para 50
                     if (otherAnswer.points === 100) {
-                        // Atualiza o score geral do outro jogador
                         roomOverallScores[room][otherPlayer.id] =
                             (roomOverallScores[room][otherPlayer.id] || 0) - 50;
                         if (roomOverallScores[room][otherPlayer.id] < 0) roomOverallScores[room][otherPlayer.id] = 0;
@@ -967,7 +947,6 @@ socket.on("validate_answer", ({ valid, room }) => {
             currentAnswer.points = duplicateFound ? 50 : 100;
         } else {
             currentAnswer.points = 0;
-            console.log(`[Socket.io] Resposta ${currentAnswer.answer} para tema ${currentTheme} marcada como inválida (anulada). Pontos: 0`);
         }
 
         // Atualiza pontuação geral do jogador
@@ -992,6 +971,7 @@ socket.on("validate_answer", ({ valid, room }) => {
             },
         });
 
+        // Avança para próxima validação
         if (validationState.currentPlayerIndex === roomsAnswers[room].length - 1 && validationState.currentThemeIndex === roomConfigs[room].themes.length - 1) {
             const allPlayersRoundScores = roomsAnswers[room].map(player => ({
                 userId: player.id,
@@ -1038,10 +1018,10 @@ socket.on("validate_answer", ({ valid, room }) => {
             });
         }
     } catch (error) {
-        console.error(`[Socket.io] Erro em validate_answer para sala ${room}:`, error);
         socket.emit("room_error", { message: "Erro interno ao validar resposta." });
     }
 });
+
 
 // ... [continua igual ao seu arquivo até o final] ...
     socket.on("submit_answers", (answers) => {

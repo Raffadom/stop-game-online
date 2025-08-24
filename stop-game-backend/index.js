@@ -917,7 +917,11 @@ socket.on("validate_answer", ({ valid, room }) => {
         currentAnswer.validated = true;
         const currentTheme = currentAnswer.theme;
 
-        // Lógica robusta de duplicidade e pontuação:
+        // LOG DETALHADO
+        console.log("=== VALIDATE_ANSWER ===");
+        console.log("Room:", room, "| Player:", currentPlayer.nickname, "| Theme:", currentTheme, "| Answer:", currentAnswer.answer, "| valid?", valid);
+
+        // Lógica robusta:
         if (!currentAnswer.answer || currentAnswer.answer.trim() === "") {
             currentAnswer.points = 0;
         } else if (valid) {
@@ -937,6 +941,7 @@ socket.on("validate_answer", ({ valid, room }) => {
                     duplicateFound = true;
                     // Se o outro já está com 100, rebaixa para 50
                     if (otherAnswer.points === 100) {
+                        // Corrige score do outro jogador
                         roomOverallScores[room][otherPlayer.id] =
                             (roomOverallScores[room][otherPlayer.id] || 0) - 50;
                         if (roomOverallScores[room][otherPlayer.id] < 0) roomOverallScores[room][otherPlayer.id] = 0;
@@ -956,6 +961,14 @@ socket.on("validate_answer", ({ valid, room }) => {
         if (roomOverallScores[room][currentPlayer.id] < 0) {
             roomOverallScores[room][currentPlayer.id] = 0;
         }
+
+        // LOG DEPOIS
+        console.log(`[VALIDATE] ${currentPlayer.nickname} "${currentAnswer.answer}" | valid: ${valid} | pontos: ${currentAnswer.points}`);
+        for (const p of roomsAnswers[room]) {
+            const as = p.answers.map(a => `${a.theme}: "${a.answer}" [${a.points}]`).join(" | ");
+            console.log(`  - ${p.nickname}: ${as}`);
+        }
+        console.log("===============================");
 
         io.to(room).emit("answer_validated", {
             current: {
@@ -1021,6 +1034,7 @@ socket.on("validate_answer", ({ valid, room }) => {
         socket.emit("room_error", { message: "Erro interno ao validar resposta." });
     }
 });
+
 
 
 // ... [continua igual ao seu arquivo até o final] ...

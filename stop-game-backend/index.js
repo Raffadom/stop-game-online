@@ -142,7 +142,7 @@ const roomsAnswers = {};
 const stopCallers = {};
 const validationStates = {};
 const roomConfigs = {};
-const roomOverallScores = {};
+const roomOverallScores = {}; // Overall scores for the entire game
 const playerDisconnectionTimers = {}; // Mantenha um mapa de temporizadores de desconexão para admins
 
 // ------------------------
@@ -176,6 +176,7 @@ function initiateValidationProcess(room) {
 
         if (!roomsAnswers[room]) roomsAnswers[room] = [];
 
+        // Ensure all players in the room have an entry in roomsAnswers with all themes
         playersInRoom.forEach(p => {
             const playerAnswersIndex = roomsAnswers[room].findIndex(r => r.id === p.userId);
             if (playerAnswersIndex === -1) {
@@ -183,10 +184,11 @@ function initiateValidationProcess(room) {
                 roomsAnswers[room].push({
                     id: p.userId,
                     nickname: p.nickname,
-                    answers: currentThemes.map(theme => ({ theme, answer: "", points: null }))
+                    answers: currentThemes.map(theme => ({ theme, answer: "", points: null, validated: false }))
                 });
             } else {
                 const playerAnswers = roomsAnswers[room][playerAnswersIndex];
+                // Ensure existing players have all current themes and default answer state
                 playerAnswers.answers = currentThemes.map(theme => {
                     const existingAnswer = playerAnswers.answers.find(a => a.theme === theme);
                     return existingAnswer || { theme, answer: "", points: null, validated: false };
@@ -194,6 +196,7 @@ function initiateValidationProcess(room) {
             }
         });
 
+        // Sort players for consistent validation order (stop caller first)
         const orderedPlayersAnswers = [...roomsAnswers[room]].sort((a, b) => {
             if (stopCallers[room] === a.id) return -1;
             if (stopCallers[room] === b.id) return 1;
@@ -207,6 +210,7 @@ function initiateValidationProcess(room) {
             return;
         }
 
+        // Determine who is the judge for this validation round
         const initialValidatorId = stopCallers[room] || roomsAnswers[room][0].id;
 
         validationStates[room] = {
@@ -217,7 +221,12 @@ function initiateValidationProcess(room) {
         };
 
         const currentPlayer = roomsAnswers[room][validationStates[room].currentPlayerIndex];
-        const currentThemeData = currentPlayer.answers[validationStates[room].currentThemeIndex] || { theme: config.themes[validationStates[room].currentThemeIndex], answer: "", points: null };
+        const currentThemeData = currentPlayer.answers[validationStates[room].currentThemeIndex] || { 
+            theme: config.themes[validationStates[room].currentThemeIndex], 
+            answer: "", 
+            points: null,
+            validated: false // Default to false if not present
+        };
         const validatorSocketId = players[validationStates[room].validatorId]?.id;
 
         const isLastPlayerOfThemeInitial = validationStates[room].currentPlayerIndex === totalPlayers - 1;
@@ -231,7 +240,7 @@ function initiateValidationProcess(room) {
                 themeIndex: validationStates[room].currentThemeIndex,
                 theme: currentThemeData.theme,
                 answer: currentThemeData.answer,
-                validated: currentThemeData.validated || false,
+                validated: currentThemeData.validated, // Ensure this is sent
                 isLastAnswerOfTheme: isLastPlayerOfThemeInitial,
                 isLastAnswerOfGame: isLastPlayerOfThemeInitial && isLastThemeOfGameInitial,
             },
@@ -363,6 +372,12 @@ io.on("connection", (socket) => {
             if (configFromFirestore) {
                 roomConfig = { ...configFromFirestore, isSaved: true };
                 console.log(`[Backend Log - rejoin_room] Sala ${roomId} encontrada no Firestore. isSaved: true.`);
+
+                // Ensure validationStates is cleared on rejoin for a saved room.
+                // This prevents stale validation data if a judge reconnects mid-validation.
+                if (validationStates[roomId]) {
+                    delete validationStates[roomId];
+                }
             } else if (roomConfigs[roomId]) {
                 roomConfig = { ...roomConfigs[roomId], isSaved: false };
                 console.log(`[Backend Log - rejoin_room] Sala ${roomId} encontrada em memória. isSaved: ${roomConfig.isSaved}.`);
@@ -453,7 +468,7 @@ io.on("connection", (socket) => {
                 isSaved: roomConfig.isSaved,
             };
 
-            console.log(`[Backend Log - rejoin_room] Reingresso bem-sucedido para ${nickname} (${userId}) na sala ${roomId}. isCreator: ${player.isCreator}, isSaved: ${roomConfig.isSaved}, roundEnded: ${roomConfig.roundEnded}`);
+            console.log(`[Backend Log - rejoin_room] Reingresso bem-sucedido para ${nickname} (${userId}) na sala ${roomId}. isCreator: ${player.isCreator}, isSaved: ${roomConfig.isSaved}, roundEnded: ${roomConfig.roundEnded}.`);
             socket.emit('rejoin_room_success', {
                 room: currentRoomData,
                 player: {
@@ -495,15 +510,10 @@ io.on("connection", (socket) => {
                 currentRoomConfig = { ...configFromFirestore, isSaved: true };
                 roomIsSaved = true;
                 console.log(`[Backend Log - join_room] Sala ${room} encontrada no Firestore. isSaved: true, creatorId: ${currentRoomConfig.creatorId}.`);
-
-                // --- Lógica para resetar estado de rodada se a sala estiver salva e finalizada ---
-                if (currentRoomConfig.isSaved && (currentRoomConfig.roundEnded || currentRoomConfig.roundActive || currentRoomConfig.currentLetter || currentRoomConfig.stopClickedByMe)) {
-                    console.log(`[Backend Log - join_room] Resetando estado de rodada para sala salva ${room}.`);
-                    currentRoomConfig.roundActive = false;
-                    currentRoomConfig.roundEnded = false;
-                    currentRoomConfig.currentLetter = null;
-                    currentRoomConfig.stopClickedByMe = null;
-                    configChanged = true; // Marcar que a configuração foi alterada
+                
+                // Clear validation states for joining a saved room.
+                if (validationStates[room]) {
+                    delete validationStates[room];
                 }
 
             } else if (roomConfigs[room]) {
@@ -714,9 +724,17 @@ io.on("connection", (socket) => {
                 return;
             }
 
+            // Clear previous round data
             roomsAnswers[room] = [];
             stopCallers[room] = null;
             validationStates[room] = null;
+            
+            // Clear overall scores for a new game, if that's the intention of "start_round"
+            // If "start_round" means "new round in the same game", then don't clear overall scores here.
+            // Assuming "start_round" is for a new round in the same game, overall scores should persist.
+            // If it's a new game, add a separate "new_game" event to clear roomOverallScores.
+            // For now, let's keep roomOverallScores persistent across rounds.
+
             if (config.roundTimerId) clearTimeout(config.roundTimerId);
             config.roundEnded = false;
             config.stopClickedByMe = null;
@@ -854,7 +872,8 @@ io.on("connection", (socket) => {
                 socket.emit("room_error", { message: "Erro: Apenas o juiz pode revelar respostas." });
                 return;
             }
-            io.to(room).emit("reveal_answer");
+            // Emit to all clients in the room, including the judge's own client
+            io.to(room).emit("reveal_answer"); 
             console.log(`[Socket.io] Evento reveal_answer propagado para todos na sala ${room}.`);
         } catch (error) {
             console.error(`[Socket.io] Erro em reveal_answer para sala ${room}:`, error);
@@ -862,65 +881,105 @@ io.on("connection", (socket) => {
         }
     });
 
-    socket.on("validate_answer", ({ valid, room }) => {
-        try {
-            const userId = socket.userId;
-            if (!userId) {
-                console.warn(`[Socket.io] validate_answer: userId é null. Autenticação/conexão de socket inválida.`);
-                socket.emit("room_error", { message: "Erro: Usuário não identificado." });
-                return;
-            }
-            console.log(`[Socket.io] Recebido validate_answer. Socket ID: ${socket.id}, Sala: ${room}, Valid: ${valid}`);
-            if (!room || !roomConfigs[room]) {
-                console.warn(`[Socket.io] validate_answer: Sala ${room} indefinida ou não encontrada.`);
-                socket.emit("room_error", { message: "Erro: Sala não encontrada." });
-                return;
-            }
-            const validationState = validationStates[room];
-            if (!validationState) {
-                console.warn(`[Socket.io] validate_answer: Estado de validação não encontrado para sala ${room}.`);
-                socket.emit("room_error", { message: "Erro: Estado de validação não encontrado." });
-                return;
-            }
-            if (validationState.validatorId !== userId) {
-                console.warn(`[Socket.io] validate_answer: Socket ${socket.id} (userId: ${userId}) não é o juiz atual para sala ${room}.`);
-                socket.emit("room_error", { message: "Erro: Apenas o juiz pode validar respostas." });
-                return;
-            }
+   // ... [todo o código inicial igual ao seu, até o bloco abaixo] ...
 
-            const currentPlayer = roomsAnswers[room][validationState.currentPlayerIndex];
-            const currentAnswer = currentPlayer.answers[validationState.currentThemeIndex];
-            currentAnswer.validated = true;
+socket.on("validate_answer", ({ valid, room }) => {
+    try {
+        const userId = socket.userId;
+        if (!userId) {
+            console.warn(`[Socket.io] validate_answer: userId é null. Autenticação/conexão de socket inválida.`);
+            socket.emit("room_error", { message: "Erro: Usuário não identificado." });
+            return;
+        }
+        console.log(`[Socket.io] Recebido validate_answer. Socket ID: ${socket.id}, Sala: ${room}, Valid: ${valid}`);
+        if (!room || !roomConfigs[room]) {
+            console.warn(`[Socket.io] validate_answer: Sala ${room} indefinida ou não encontrada.`);
+            socket.emit("room_error", { message: "Erro: Sala não encontrada." });
+            return;
+        }
+        const validationState = validationStates[room];
+        if (!validationState) {
+            console.warn(`[Socket.io] validate_answer: Estado de validação não encontrado para sala ${room}.`);
+            socket.emit("room_error", { message: "Erro: Estado de validação não encontrado." });
+            return;
+        }
+        if (validationState.validatorId !== userId) {
+            console.warn(`[Socket.io] validate_answer: Socket ${socket.id} (userId: ${userId}) não é o juiz atual para sala ${room}.`);
+            socket.emit("room_error", { message: "Erro: Apenas o juiz pode validar respostas." });
+            return;
+        }
 
-            // Regra 1: Resposta vazia sempre recebe 0 pontos
-            if (!currentAnswer.answer || currentAnswer.answer.trim() === "") {
-                currentAnswer.points = 0;
-                console.log(`[Socket.io] Resposta vazia detectada para ${currentPlayer.nickname}, tema ${currentAnswer.theme}. Pontos: 0`);
-            } else if (valid) {
-                // Regra 2: Verificar duplicatas com normalização, excluindo a própria resposta
-                const currentTheme = currentAnswer.theme;
-                const normalizedCurrentAnswer = normalizeAnswer(currentAnswer.answer);
-                const allAnswersForTheme = roomsAnswers[room]
-                    .filter(player => player.id !== currentPlayer.id) // Exclui o jogador atual
-                    .flatMap(player => player.answers)
-                    .filter(answer => answer.theme === currentTheme && answer.answer && answer.answer.trim() !== "");
-                const isDuplicate = allAnswersForTheme.some(answer =>
-                    normalizeAnswer(answer.answer) === normalizedCurrentAnswer
-                );
+        const currentPlayer = roomsAnswers[room][validationState.currentPlayerIndex];
+        const currentAnswer = currentPlayer.answers[validationState.currentThemeIndex];
 
-                // Regra 3: 100 pontos para respostas únicas válidas, 50 para duplicadas
-                currentAnswer.points = isDuplicate ? 50 : 100;
-                console.log(`[Socket.io] Resposta ${currentAnswer.answer} (normalizada: ${normalizedCurrentAnswer}) para tema ${currentTheme}. Duplicada: ${isDuplicate}, Pontos: ${currentAnswer.points}`);
-            } else {
-                currentAnswer.points = 0; // Se não for válida, 0 pontos
-                console.log(`[Socket.io] Resposta ${currentAnswer.answer} para tema ${currentTheme} marcada como inválida. Pontos: 0`);
+        // Debug logs (pode remover depois de testar)
+        console.log("====== DEBUG VALIDATE_ANSWER ======");
+        console.log("ROOM:", room);
+        console.log("RESPONDENDO:", currentPlayer.nickname, "userId:", currentPlayer.id);
+        console.log("TEMA:", currentAnswer.theme);
+        console.log("RESPOSTA:", currentAnswer.answer);
+        console.log("VALIDADA?:", valid);
+        console.log("ESTADO ATUAL DAS RESPOSTAS:");
+        roomsAnswers[room].forEach(p => {
+          p.answers.forEach(a => {
+            console.log(`[${p.nickname}] ${a.theme}: "${a.answer}" | validated: ${a.validated} | points: ${a.points}`);
+          });
+        });
+        console.log("===================================");
+
+        if (!currentAnswer || typeof currentAnswer !== 'object' || currentAnswer === null) {
+            console.error(`[Socket.io] Erro em validate_answer: currentAnswer inválida/não encontrada para sala ${room}, jogador ${currentPlayer?.nickname}, temaIndex ${validationState.currentThemeIndex}.`);
+            socket.emit("room_error", { message: "Erro interno ao validar resposta: resposta ausente." });
+            return;
+        }
+
+        const previousPointsForCurrentAnswer = currentAnswer.points || 0;
+        currentAnswer.validated = true;
+        const currentTheme = currentAnswer.theme;
+
+        // Lógica corrigida:
+        if (!currentAnswer.answer || currentAnswer.answer.trim() === "") {
+            currentAnswer.points = 0;
+            console.log(`[Socket.io] Resposta vazia detectada para ${currentPlayer.nickname}, tema ${currentTheme}. Pontos: 0`);
+        } else if (valid) {
+            const normalizedCurrentAnswer = normalizeAnswer(currentAnswer.answer);
+            let duplicateFound = false;
+            for (const otherPlayer of roomsAnswers[room]) {
+                if (otherPlayer.id === currentPlayer.id) continue;
+                const otherAnswer = otherPlayer.answers[validationState.currentThemeIndex];
+                if (
+                    otherAnswer &&
+                    otherAnswer.validated &&
+                    otherAnswer.points > 0 &&
+                    normalizeAnswer(otherAnswer.answer) === normalizedCurrentAnswer
+                ) {
+                    duplicateFound = true;
+                    // Se o outro já está com 100, rebaixa para 50
+                    if (otherAnswer.points === 100) {
+                        // Atualiza o score geral do outro jogador
+                        roomOverallScores[room][otherPlayer.id] =
+                            (roomOverallScores[room][otherPlayer.id] || 0) - 50;
+                        if (roomOverallScores[room][otherPlayer.id] < 0) roomOverallScores[room][otherPlayer.id] = 0;
+                        otherAnswer.points = 50;
+                    }
+                }
             }
+            currentAnswer.points = duplicateFound ? 50 : 100;
+        } else {
+            currentAnswer.points = 0;
+            console.log(`[Socket.io] Resposta ${currentAnswer.answer} para tema ${currentTheme} marcada como inválida (anulada). Pontos: 0`);
+        }
 
-            if (!roomOverallScores[room]) roomOverallScores[room] = {};
-            if (!roomOverallScores[room][currentPlayer.id]) roomOverallScores[room][currentPlayer.id] = 0;
-            roomOverallScores[room][currentPlayer.id] += currentAnswer.points;
+        // Atualiza pontuação geral do jogador
+        if (!roomOverallScores[room]) roomOverallScores[room] = {};
+        if (!roomOverallScores[room][currentPlayer.id]) roomOverallScores[room][currentPlayer.id] = 0;
+        roomOverallScores[room][currentPlayer.id] = roomOverallScores[room][currentPlayer.id] - previousPointsForCurrentAnswer + currentAnswer.points;
+        if (roomOverallScores[room][currentPlayer.id] < 0) {
+            roomOverallScores[room][currentPlayer.id] = 0;
+        }
 
-            console.log(`[Socket.io] Resposta validada para sala ${room}:`, {
+        io.to(room).emit("answer_validated", {
+            current: {
                 playerId: currentPlayer.id,
                 playerNickname: currentPlayer.nickname,
                 themeIndex: validationState.currentThemeIndex,
@@ -928,77 +987,63 @@ io.on("connection", (socket) => {
                 answer: currentAnswer.answer,
                 points: currentAnswer.points,
                 validated: currentAnswer.validated,
-                isDuplicate: currentAnswer.points === 50,
-            });
+                isLastAnswerOfTheme: validationState.currentPlayerIndex === roomsAnswers[room].length - 1,
+                isLastAnswerOfGame: validationState.currentPlayerIndex === roomsAnswers[room].length - 1 && validationState.currentThemeIndex === roomConfigs[room].themes.length - 1,
+            },
+        });
 
-            io.to(room).emit("answer_validated", {
+        if (validationState.currentPlayerIndex === roomsAnswers[room].length - 1 && validationState.currentThemeIndex === roomConfigs[room].themes.length - 1) {
+            const allPlayersRoundScores = roomsAnswers[room].map(player => ({
+                userId: player.id,
+                nickname: player.nickname,
+                roundScore: player.answers.reduce((sum, answer) => sum + (answer.points > 0 ? answer.points : 0), 0),
+                overallScore: roomOverallScores[room][player.id] || 0,
+            }));
+            io.to(room).emit("all_answers_validated", allPlayersRoundScores);
+            delete validationStates[room];
+        } else if (validationState.currentPlayerIndex === roomsAnswers[room].length - 1) {
+            validationState.currentPlayerIndex = 0;
+            validationState.currentThemeIndex += 1;
+            const nextPlayer = roomsAnswers[room][validationState.currentPlayerIndex];
+            const nextAnswer = nextPlayer.answers[validationState.currentThemeIndex];
+            io.to(room).emit("start_validation", {
                 current: {
-                    playerId: currentPlayer.id,
-                    playerNickname: currentPlayer.nickname,
+                    playerId: nextPlayer.id,
+                    playerNickname: nextPlayer.nickname,
                     themeIndex: validationState.currentThemeIndex,
-                    theme: currentAnswer.theme,
-                    answer: currentAnswer.answer,
-                    points: currentAnswer.points,
-                    validated: currentAnswer.validated,
+                    theme: nextAnswer.theme,
+                    answer: nextAnswer.answer,
+                    validated: nextAnswer.validated || false,
+                    isLastAnswerOfTheme: false,
+                    isLastAnswerOfGame: validationState.currentThemeIndex === roomConfigs[room].themes.length - 1,
+                },
+                judgeId: socket.id,
+            });
+        } else {
+            validationState.currentPlayerIndex += 1;
+            const nextPlayer = roomsAnswers[room][validationState.currentPlayerIndex];
+            const nextAnswer = nextPlayer.answers[validationState.currentThemeIndex];
+            io.to(room).emit("start_validation", {
+                current: {
+                    playerId: nextPlayer.id,
+                    playerNickname: nextPlayer.nickname,
+                    themeIndex: validationState.currentThemeIndex,
+                    theme: nextAnswer.theme,
+                    answer: nextAnswer.answer,
+                    validated: nextAnswer.validated || false,
                     isLastAnswerOfTheme: validationState.currentPlayerIndex === roomsAnswers[room].length - 1,
                     isLastAnswerOfGame: validationState.currentPlayerIndex === roomsAnswers[room].length - 1 && validationState.currentThemeIndex === roomConfigs[room].themes.length - 1,
                 },
+                judgeId: socket.id,
             });
-
-            if (validationState.currentPlayerIndex === roomsAnswers[room].length - 1 && validationState.currentThemeIndex === roomConfigs[room].themes.length - 1) {
-                console.log(`[Socket.io] Todas as respostas validadas para sala ${room}`);
-                const roundScores = roomsAnswers[room].map(player => ({
-                    userId: player.id,
-                    nickname: player.nickname,
-                    roundScore: player.answers.reduce((sum, answer) => sum + (answer.points || 0), 0),
-                    overallScore: roomOverallScores[room][player.id] || 0,
-                }));
-                io.to(room).emit("all_answers_validated", roundScores);
-                delete validationStates[room];
-            } else if (validationState.currentPlayerIndex === roomsAnswers[room].length - 1) {
-                validationState.currentPlayerIndex = 0;
-                validationState.currentThemeIndex += 1;
-                const nextPlayer = roomsAnswers[room][validationState.currentPlayerIndex];
-                const nextAnswer = nextPlayer.answers[validationState.currentThemeIndex];
-                console.log(`[Socket.io] Passando para o próximo tema na sala ${room}`);
-                io.to(room).emit("start_validation", {
-                    current: {
-                        playerId: nextPlayer.id,
-                        playerNickname: nextPlayer.nickname,
-                        themeIndex: validationState.currentThemeIndex,
-                        theme: nextAnswer.theme,
-                        answer: nextAnswer.answer,
-                        validated: nextAnswer.validated || false,
-                        isLastAnswerOfTheme: false,
-                        isLastAnswerOfGame: validationState.currentThemeIndex === roomConfigs[room].themes.length - 1,
-                    },
-                    judgeId: socket.id,
-                });
-            } else {
-                validationState.currentPlayerIndex += 1;
-                const nextPlayer = roomsAnswers[room][validationState.currentPlayerIndex];
-                const nextAnswer = nextPlayer.answers[validationState.currentThemeIndex];
-                console.log(`[Socket.io] Passando para a próxima resposta na sala ${room}`);
-                io.to(room).emit("start_validation", {
-                    current: {
-                        playerId: nextPlayer.id,
-                        playerNickname: nextPlayer.nickname,
-                        themeIndex: validationState.currentThemeIndex,
-                        theme: nextAnswer.theme,
-                        answer: nextAnswer.answer,
-                        validated: nextAnswer.validated || false,
-                        isLastAnswerOfTheme: validationState.currentPlayerIndex === roomsAnswers[room].length - 1,
-                        isLastAnswerOfGame: validationState.currentPlayerIndex === roomsAnswers[room].length - 1 && validationState.currentThemeIndex === roomConfigs[room].themes.length - 1,
-                    },
-                    judgeId: socket.id,
-                });
-            }
-        } catch (error) {
-            console.error(`[Socket.io] Erro em validate_answer para sala ${room}:`, error);
-            socket.emit("room_error", { message: "Erro interno ao validar resposta." });
         }
-    });
+    } catch (error) {
+        console.error(`[Socket.io] Erro em validate_answer para sala ${room}:`, error);
+        socket.emit("room_error", { message: "Erro interno ao validar resposta." });
+    }
+});
 
+// ... [continua igual ao seu arquivo até o final] ...
     socket.on("submit_answers", (answers) => {
         try {
             const userId = socket.userId;
@@ -1108,10 +1153,11 @@ io.on("connection", (socket) => {
                 await saveRoomConfigToFirestore(room, roomConfigs[room]);
             }
 
+            // Clear ALL game data including overall scores for a true "end game"
             delete roomsAnswers[room];
             delete stopCallers[room];
             delete validationStates[room];
-            delete roomOverallScores[room];
+            delete roomOverallScores[room]; 
 
             console.log(`[Socket.io] Partida na sala ${room} encerrada. Configurações da sala mantidas, dados de jogo limpos.`);
         } catch (error) {
@@ -1164,15 +1210,16 @@ io.on("connection", (socket) => {
                     clearTimeout(roomConfigs[room].countdownTimerId);
                     roomConfigs[room].countdownTimerId = null;
                 }
+                // When a room becomes empty, clear all associated game data
                 delete roomsAnswers[room];
                 delete stopCallers[room];
                 delete validationStates[room];
-                delete roomOverallScores[room];
+                delete roomOverallScores[room]; // Clear overall scores if room is truly abandoned
                 // Opcional: deleteRoomConfigFromFirestore(room);
-                // delete roomConfigs[room];
+                // delete roomConfigs[room]; // Keep roomConfig in memory if you want to reuse room ID
             }
 
-            // Sempre emite players_update, mesmo que a sala esteja vazia (resultará em lista vazia)
+            // Always emit players_update, even if the room is empty (will result in empty list)
             io.to(room).emit("players_update", playersInRoom.map(p => ({
                 id: p.id, nickname: p.nickname, userId: p.userId, isCreator: p.isCreator
             })));

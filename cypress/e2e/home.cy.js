@@ -10,5 +10,6 @@ const save_room = Cypress.env('SAVE_ROOM')
         cy.contains('RAFFA001 (Admin)').should('be.visible')
         cy.contains('Famí001').should('be.visible')
         cy.contains('Sala Salva').should('be.visible')
+        cy.get('.bg-blue-200').should('be.visible');
     })
 })

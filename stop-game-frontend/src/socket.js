@@ -1,27 +1,31 @@
 // socket.js
-import { io } from "socket.io-client";
+import { io } from 'socket.io-client';
 
-const URL = process.env.NODE_ENV === 'production'
-  ? 'https://your-production-url.com'
-  : 'http://localhost:3001';
+// Configuração para produção e desenvolvimento
+const getSocketUrl = () => {
+  // Se estiver em produção (build), usar a URL do backend no Render
+  if (import.meta.env.PROD) {
+    return 'https://stop-game-backend.onrender.com';
+  }
+  
+  // Se estiver em desenvolvimento, usar localhost
+  return 'http://localhost:3001';
+};
 
-export const socket = io(URL, {
-  autoConnect: true,
-  reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000,
-  reconnectionDelayMax: 5000,
+export const socket = io(getSocketUrl(), {
+  transports: ['websocket', 'polling'],
   timeout: 20000,
+  forceNew: true
 });
 
-socket.on("connect", () => {
-  console.log("Socket.IO CLIENT: Conectado ao servidor! ID:", socket.id);
+socket.on('connect', () => {
+  console.log('Socket.IO CLIENT: Conectado ao servidor! ID:', socket.id);
 });
 
-socket.on("disconnect", () => {
-  console.log("Socket.IO CLIENT: Desconectado do servidor!");
+socket.on('connect_error', (error) => {
+  console.error('Socket.IO CLIENT: Erro na conexão:', error.message);
 });
 
-socket.on("connect_error", (error) => {
-  console.error("Socket.IO CLIENT: Erro na conexão:", error);
+socket.on('disconnect', (reason) => {
+  console.log('Socket.IO CLIENT: Desconectado. Motivo:', reason);
 });

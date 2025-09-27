@@ -44,10 +44,19 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
     ? ['https://stop-paper.netlify.app']
     : ['http://localhost:5173', 'https://stop-paper.netlify.app'];
 
-app.use(cors({
-    origin: allowedOrigins,
-    methods: ["GET", "POST"]
-}));
+// Na configuração do CORS, adicione os domínios corretos:
+const corsOptions = {
+  origin: [
+    "http://localhost:5173",
+    "http://localhost:3000", 
+    "https://stop-game-frontend.netlify.app",
+    "https://stop-paper.netlify.app"
+  ],
+  methods: ["GET", "POST"],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 
 app.get('/', (req, res) => {
     res.status(200).send("Stop Game Backend is running and ready for Socket.IO connections!");
@@ -56,10 +65,17 @@ app.get('/', (req, res) => {
 const server = http.createServer(app);
 
 const io = new Server(server, {
-    cors: {
-        origin: allowedOrigins,
-        methods: ["GET", "POST"]
-    }
+  cors: {
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:3000",
+      "https://stop-game-frontend.netlify.app", 
+      "https://stop-paper.netlify.app"
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  transports: ['websocket', 'polling']
 });
 
 const appId = "stop-game-app";

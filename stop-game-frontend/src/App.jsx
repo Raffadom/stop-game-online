@@ -139,17 +139,25 @@ function App() {
 
   const handleStartRound = useCallback(() => {
     if (isAdmin && !roundStarted && !roundEnded && countdown === null && roomThemes.length > 0) {
+      console.log("[App] Iniciando nova rodada:", {
+        room,
+        isAdmin,
+        roundStarted,
+        roundEnded,
+        countdown,
+        themesCount: roomThemes.length
+      });
+      
       socket.emit('start_round', { room });
-      console.log("Emitindo start_round para sala:", room);
     } else {
       let errorMessage = "";
       if (!isAdmin) errorMessage = "Somente o administrador pode iniciar a rodada.";
       else if (roundStarted || roundEnded) errorMessage = "A rodada já está em andamento ou finalizada.";
       else if (countdown !== null) errorMessage = "A contagem regressiva já está ativa.";
       else if (roomThemes.length === 0) errorMessage = "Adicione pelo menos um tema antes de iniciar.";
+      
       setRoomError(errorMessage);
       setAlert({ isVisible: true, message: errorMessage, type: 'error' });
-      console.log("handleStartRound bloqueado:", { isAdmin, roundStarted, roundEnded, countdown, themes: roomThemes });
     }
   }, [isAdmin, roundStarted, roundEnded, countdown, room, roomThemes]);
 
@@ -459,6 +467,17 @@ function App() {
 
     setIsConnected(socket.connected);
 
+    const handleError = (error) => {
+      console.error('[App] Socket error:', error);
+      setAlert({ 
+        isVisible: true, 
+        message: error.message || "Erro ao processar a solicitação", 
+        type: 'error' 
+      });
+    };
+
+    socket.on("error", handleError);
+
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
@@ -475,6 +494,7 @@ function App() {
       socket.off('round_ended', onRoundEnded);
       socket.off('room_reset_ack', onRoomResetAck);
       socket.off('room_saved_success', onRoomSavedSuccess);
+      socket.off("error", handleError);
     };
   }, [
     userId, isInRoom,

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import GameBoard from "./GameBoard";
 import Timer from "./Timer";
 import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
+import { socket } from '../socket'; // Importar socket
 
 // Alertas customizados para melhor UX
 const Alert = ({ message, type, isVisible, onClose }) => {
@@ -83,10 +84,21 @@ export default function Room({
     }
   }, [alertState, setAlertState]);
 
-  // Removemos o console.log de depuração visual do useEffect aqui
-  // useEffect(() => {
-  //   console.log(`[Room Component - Render Update] userId: ${userId}, isAdmin: ${isAdmin}, roundStarted: ${roundStarted}, roundEnded: ${roundEnded}, countdown: ${countdown}`);
-  // }, [isAdmin, roundStarted, roundEnded, countdown, userId]);
+  // useEffect para debug de eventos socket - CORRIGIDO
+  useEffect(() => {
+    const handleRoomJoined = (data) => {
+      console.log('[Room] room_joined recebido:', data);
+      console.log('[Room] Player data:', data.player);
+      console.log('[Room] isCreator:', data.player?.isCreator);
+    };
+
+    socket.on('room_joined', handleRoomJoined);
+
+    // Cleanup
+    return () => {
+      socket.off('room_joined', handleRoomJoined);
+    };
+  }, []);
 
   const toggleTheme = () => {
     setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
@@ -127,9 +139,6 @@ export default function Room({
   const isSaveButtonVisible = isAdmin && !roundStarted && !roundEnded;
   const isStartRoundControlsVisible = isAdmin && !roundStarted && !roundEnded && countdown === null;
 
-  // A função getAdminButtonHiddenReason não é mais necessária, pois as mensagens foram removidas
-  // const getAdminButtonHiddenReason = () => { ... };
-
   return (
     <div className="flex flex-col min-h-screen max-w-5xl mx-auto px-4 py-6 space-y-8 relative">
       {/* Componente de alerta */}
@@ -159,6 +168,7 @@ export default function Room({
           Sala: <span className="font-bold text-blue-600">{room}</span>
           {isRoomSaved && (
             <span className="text-green-500" title="Sala salva">
+              ✅
             </span>
           )}
           <button
@@ -247,7 +257,7 @@ export default function Room({
         {/* Estes controles não são de admin, então mantêm a lógica original */}
         {roundStarted && countdown === null && (
           <>
-            <Timer duration={roomDuration} />
+            <Timer duration={roomDuration} room={room} />
             {!stopClickedByMe && (
               <button
                 onClick={handleStopRound}

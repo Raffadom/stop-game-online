@@ -1,39 +1,50 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from 'react';
+import { socket } from '../socket';
 
-export default function Timer({ duration }) {
-  const [time, setTime] = useState(duration);
+export default function Timer({ duration, room }) {
+  const [timeLeft, setTimeLeft] = useState(duration);
+  const [timerEnded, setTimerEnded] = useState(false);
 
   useEffect(() => {
-    // Garante que o timer comece com a duração correta
-    setTime(duration);
+    setTimeLeft(duration);
+    setTimerEnded(false);
+  }, [duration]);
 
-    const interval = setInterval(() => {
-      setTime((prevTime) => {
-        // Se o tempo chegou a 0 ou menos, limpa o intervalo
-        if (prevTime <= 1) {
-          clearInterval(interval);
-          return 0; // Garante que o tempo final seja 0
+  useEffect(() => {
+    if (timeLeft <= 0 || timerEnded) return;
+
+    const timer = setInterval(() => {
+      setTimeLeft(prev => {
+        const newTime = prev - 1;
+        
+        // Se chegou a 0, emitir time_up UMA VEZ
+        if (newTime <= 0 && !timerEnded) {
+          console.log('[Timer] Time up! Emitting time_up event for room:', room);
+          setTimerEnded(true);
+          socket.emit('time_up', { room });
+          clearInterval(timer);
+          return 0;
         }
-        return prevTime - 1;
+        
+        return newTime;
       });
     }, 1000);
 
-    // Função de limpeza: será chamada quando o componente for desmontado
-    // ou quando as dependências do useEffect (duration) mudarem.
-    return () => clearInterval(interval);
-  }, [duration]); // O efeito é re-executado sempre que a 'duration' muda
+    return () => clearInterval(timer);
+  }, [timeLeft, room, timerEnded]);
 
-  // Formatação para minutos e segundos (opcional, para durações maiores)
-  const minutes = Math.floor(time / 60);
-  const seconds = time % 60;
-  const displayTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  const minutes = Math.floor(timeLeft / 60);
+  const seconds = timeLeft % 60;
+
+  const getColorClass = () => {
+    if (timeLeft <= 10) return 'text-red-600 animate-pulse';
+    if (timeLeft <= 30) return 'text-yellow-600';
+    return 'text-green-600';
+  };
 
   return (
-    <div className="text-center text-lg font-bold dark:text-gray-100"> {/* Adicionada classe dark:text-gray-100 */}
-      Tempo restante:{" "}
-      <span className={time <= 10 ? "text-red-600 dark:text-red-400 animate-pulse" : "text-blue-600 dark:text-blue-400"}> {/* Adicionadas classes dark:text-red-400 e dark:text-blue-400 */}
-        {displayTime}
-      </span>
+    <div className={`text-4xl font-bold text-center ${getColorClass()}`}>
+      ⏰ {minutes}:{seconds.toString().padStart(2, '0')}
     </div>
   );
 }

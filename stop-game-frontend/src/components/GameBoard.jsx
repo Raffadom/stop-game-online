@@ -31,6 +31,8 @@ export default function GameBoard({
   const [roundScores, setRoundScores] = useState(null);
   const [isRevealing, setIsRevealing] = useState(false);
   const [newThemeInput, setNewThemeInput] = useState("");
+  const [roundScore, setRoundScore] = useState(null);
+  const [showRoundResult, setShowRoundResult] = useState(false);
   const maxThemes = 10;
 
   // Initialize or update answers array
@@ -154,8 +156,19 @@ export default function GameBoard({
         });
         setAnswers(updatedAnswers);
         
-        const totalPoints = data.myScore || 0;
-        setTotalPoints(totalPoints);
+        // CORREÇÃO: Mostrar pontuação da rodada atual
+        const roundPoints = data.myScore || 0;
+        const totalPoints = data.myTotalScore || 0;
+        
+        // Exibir pontuação da rodada
+        setTotalPoints(roundPoints);  
+        
+        // NOVO: Mostrar notificação da pontuação
+        console.log(`[GameBoard] Rodada finalizada! Pontos da rodada: ${roundPoints}, Total geral: ${totalPoints}`);
+        
+        // NOVO: Definir estado para mostrar resultado da rodada
+        setRoundScore(roundPoints);
+        setShowRoundResult(true);
         
         setShowModal(false);
         setValidationData(null);
@@ -174,12 +187,27 @@ export default function GameBoard({
     };
 
     const handleNewRoundStarted = () => {
-      setShowResults(false);
-      setRoundScores(null);
-      setFinalRanking(null);
-      setShowModal(false);
+      console.log('[GameBoard] Nova rodada iniciada - limpando estados');
+      
+      // Limpar estados da rodada anterior
+      setShowRoundResult(false);
+      setRoundScore(null);
+      setTotalPoints(null);
+      setRevealed(false);
+      setCanReveal(false);
+      setIsRevealing(false);
+      setIsValidating(false);
       setValidationData(null);
-      handleRoundStarted({});
+      setShowModal(false);
+      
+      // CORREÇÃO: Usar roomThemes ao invés de themes
+      setAnswers(roomThemes.map(theme => ({ 
+        theme, 
+        answer: "", 
+        points: null, 
+        reason: "", 
+        validated: false 
+      })));
     };
 
     const handleTimeUpRoundEnded = () => {
@@ -259,13 +287,26 @@ export default function GameBoard({
   const handleNewRound = useCallback(() => {
     if (!room || !isAdmin) return;
     
+    // Limpar estado da rodada anterior
+    setShowRoundResult(false);
+    setRoundScore(null);
+    setTotalPoints(null);
+    // CORREÇÃO: Usar roomThemes ao invés de themes
+    setAnswers(roomThemes.map(theme => ({ theme, answer: "", points: null, reason: "", validated: false })));
+    
     socket.emit("new_round", { room });
-  }, [room, isAdmin]);
+    console.log('[GameBoard] Nova rodada solicitada');
+  }, [room, isAdmin, roomThemes]); // Adicionar roomThemes como dependência
 
   const handleEndGame = useCallback(() => {
     if (!room || !isAdmin) return;
     
+    // Limpar estados
+    setShowRoundResult(false);
+    setRoundScore(null);
+    
     socket.emit("end_game", { room });
+    console.log('[GameBoard] Fim de jogo solicitado');
   }, [room, isAdmin]);
 
   const handleLeaveRoom = useCallback(() => {
@@ -547,7 +588,9 @@ export default function GameBoard({
                 />
                 {a.points !== null && (
                   <div className={`text-right font-semibold mt-1 ${
-                    a.points > 0 ? 'text-green-600' : 'text-red-600'
+                    a.points === 100 ? 'text-green-600' :        // Verde para pontuação única (100)
+                    a.points === 50 ? 'text-orange-500' :        // Laranja para pontuação metade (50)  
+                    'text-red-600'                               // Vermelho para pontuação zero (0)
                   }`}>
                     {a.points} pontos
                   </div>
@@ -608,6 +651,31 @@ export default function GameBoard({
           >
             🚪 Sair da Sala
           </button>
+        </div>
+      )}
+
+      {/* Resultado da Rodada - Apenas exibição dos pontos */}
+      {showRoundResult && roundScore !== null && (
+        <div className="mt-6 bg-gradient-to-r from-blue-50 to-green-50 dark:from-blue-900 dark:to-green-900 p-6 rounded-xl border-2 border-blue-200 dark:border-blue-700 text-center">
+          <div className="flex items-center justify-center mb-4">
+            <div className="bg-blue-500 text-white rounded-full p-2 mr-3">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h3 className="text-2xl font-bold text-blue-700 dark:text-blue-300">
+              🎯 Resultado da Rodada
+            </h3>
+          </div>
+          
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6">
+            <div className="text-4xl font-bold text-green-600 dark:text-green-400 mb-2">
+              +{roundScore} pontos
+            </div>
+            <p className="text-gray-600 dark:text-gray-400 text-lg">
+              Pontos conquistados nesta rodada
+            </p>
+          </div>
         </div>
       )}
     </div>

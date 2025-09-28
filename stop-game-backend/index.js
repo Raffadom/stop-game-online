@@ -214,33 +214,42 @@ function startValidation(room) {
             .map(s => ({ id: s.userId, socketId: s.id }));
         console.log(`[Validation] Connected sockets in room ${room}:`, connectedSockets);
 
-        // Inicializar validação por tema
+        // CORREÇÃO: Inicializar completamente currentValidation com queue
+        const firstTheme = config.themes[0];
+        const validationQueue = [];
+        
+        // Criar queue com todos os jogadores para o primeiro tema
+        answers.forEach((playerData, index) => {
+            validationQueue.push({
+                playerId: playerData.id,
+                playerNickname: playerData.nickname,
+                theme: firstTheme,
+                answer: playerData.answers[0]?.answer || "",
+                themeIndex: 0,
+                currentPlayerIndex: index,
+                totalPlayers: answers.length,
+                totalThemes: config.themes.length
+            });
+        });
+
+        console.log(`[Validation] Created queue with ${validationQueue.length} items for theme: ${firstTheme}`);
+
         roomState.currentValidation = {
             currentThemeIndex: 0,
             currentPlayerIndex: 0,
-            answers,
-            validatedAnswers: []
+            currentIndex: 0,  // IMPORTANTE: Inicializar currentIndex
+            queue: validationQueue,  // IMPORTANTE: Definir a queue
+            answers: answers
         };
 
-        const firstPlayer = answers[0];
-        const firstTheme = config.themes[0];
-
-        console.log(`[Validation] Emitting start_validation for room ${room} - Theme: ${firstTheme}, Player: ${firstPlayer.nickname}`);
+        const firstValidation = validationQueue[0];
+        console.log(`[Validation] Emitting start_validation for room ${room} - Theme: ${firstTheme}, Player: ${firstValidation.playerNickname}`);
         
         io.to(room).emit("start_validation", {
-            current: {
-                playerId: firstPlayer.id,
-                playerNickname: firstPlayer.nickname,
-                themeIndex: 0,
-                theme: firstTheme,
-                answer: firstPlayer.answers[0]?.answer || "",
-                validated: false,
-                totalPlayers: answers.length,
-                currentPlayerIndex: 0,
-                totalThemes: config.themes.length
-            },
+            current: firstValidation,
             judgeId: roomState.validatorId
         });
+        
     } catch (error) {
         console.error('[Validation] Error starting validation:', error);
     }
@@ -310,6 +319,92 @@ function applyScoring(allAnswers, themeIndex) {
         
     } catch (error) {
         console.error('[Scoring] Erro ao aplicar pontuação:', error);
+    }
+}
+
+// Sistema de pontuação inteligente por tema
+function applyThemeScoring(room, themeIndex, allAnswers, themes) {
+    try {
+        const themeName = themes[themeIndex];
+        console.log(`[Scoring] Aplicando pontuação para tema ${themeIndex}: ${themeName}`);
+        
+        // Coletar todas as respostas para este tema específico
+        const themeAnswers = [];
+        allAnswers.forEach(player => {
+            const answer = player.answers[themeIndex];
+            if (answer) {
+                themeAnswers.push({
+                    player: player,
+                    answer: answer,
+                    normalizedAnswer: normalizeAnswer(answer.answer)
+                });
+            }
+        });
+        
+        // Primeiro passo: tratar respostas inválidas
+        themeAnswers.forEach(({ answer, normalizedAnswer }) => {
+            // Se foi invalidada pelo juiz, pontuação 0
+            if (answer.valid === false) {
+                answer.points = 0;
+                answer.reason = "Invalidada pelo juiz";
+                return;
+            }
+            
+            // Se resposta vazia, pontuação 0
+            if (!normalizedAnswer || normalizedAnswer.length === 0) {
+                answer.points = 0;
+                answer.reason = "Resposta vazia";
+                return;
+            }
+        });
+
+        // Segundo passo: agrupar respostas VÁLIDAS por similaridade (normalizado)
+        const answerGroups = new Map();
+        
+        themeAnswers.forEach(({ player, answer, normalizedAnswer }) => {
+            // Pular respostas já pontuadas (inválidas)
+            if (answer.points !== null) return;
+            
+            // CORREÇÃO: Não tratar respostas de 1 letra separadamente
+            // Todas as respostas válidas (incluindo de 1 letra) devem ser agrupadas
+            
+            // Agrupar por resposta normalizada
+            if (!answerGroups.has(normalizedAnswer)) {
+                answerGroups.set(normalizedAnswer, []);
+            }
+            answerGroups.get(normalizedAnswer).push({ player, answer });
+        });
+        
+        // Terceiro passo: aplicar pontuação baseada na quantidade de jogadores com a mesma resposta
+        answerGroups.forEach((group, normalizedAnswer) => {
+            let points = 0;
+            let reason = "";
+            
+            if (group.length === 1) {
+                // Resposta única (incluindo respostas de 1 letra únicas)
+                points = 100;
+                reason = normalizedAnswer.length === 1 ? "Resposta única (uma letra)" : "Resposta única";
+            } else {
+                // Resposta duplicada (incluindo respostas de 1 letra duplicadas)  
+                points = 50;
+                reason = normalizedAnswer.length === 1 ? 
+                    `Resposta repetida - uma letra (${group.length} jogadores)` :
+                    `Resposta repetida (${group.length} jogadores)`;
+            }
+            
+            // Aplicar pontuação para todos do grupo
+            group.forEach(({ answer }) => {
+                answer.points = points;
+                answer.reason = reason;
+            });
+            
+            console.log(`[Scoring] Tema ${themeName} - Resposta "${normalizedAnswer}" - ${group.length} jogador(es) - ${points} pontos cada`);
+        });
+        
+        console.log(`[Scoring] Pontuação aplicada para tema ${themeIndex}: ${themeName}`);
+        
+    } catch (error) {
+        console.error(`[Scoring] Erro ao aplicar pontuação para tema ${themeIndex}:`, error);
     }
 }
 
@@ -705,85 +800,149 @@ io.on('connection', (socket) => {
     });
 
     // VALIDATE ANSWER - Movido para dentro do escopo do socket connection
-    socket.on("validate_answer", ({ valid, room }) => {
+    socket.on("validate_answer", async ({ valid, room }) => {
         try {
+            console.log(`[Validation] Validate answer received: valid=${valid}, room=${room}`);
+            
             const roomState = gameState.get(room);
-            if (!roomState) {
-                throw new Error("Room state not found");
-            }
-
-            if (roomState.validatorId !== socket.userId) {
-                console.log('[Validation] Auth failed:', {
-                    attemptingUserId: socket.userId,
-                    validatorId: roomState.validatorId
-                });
-                throw new Error("Unauthorized validation attempt");
+            const config = roomConfigs[room];
+            
+            if (!roomState || !roomState.currentValidation) {
+                console.error(`[Validation] No validation in progress for room ${room}`);
+                return;
             }
 
             const validation = roomState.currentValidation;
-            if (!validation) {
-                throw new Error("No active validation");
+            
+            // CORREÇÃO: Verificar se currentIndex é válido
+            if (!validation.queue || validation.currentIndex >= validation.queue.length) {
+                console.error(`[Validation] Invalid validation state - currentIndex: ${validation.currentIndex}, queue length: ${validation.queue?.length || 0}`);
+                return;
+            }
+            
+            const current = validation.queue[validation.currentIndex];
+            
+            if (!current) {
+                console.error(`[Validation] No current validation item at index ${validation.currentIndex}`);
+                return;
             }
 
-            const config = roomConfigs[room];
-            const currentPlayer = validation.answers[validation.currentPlayerIndex];
-            const currentThemeIndex = validation.currentThemeIndex;
+            console.log(`[Validation] Processing validation for: ${current.playerNickname} - ${current.theme} - "${current.answer}"`);
+
+            // Validar resposta
+            let finalValid = valid;
+            let reason = '';
             
-            if (!currentPlayer || !currentPlayer.answers[currentThemeIndex]) {
-                throw new Error("Invalid player or answer index");
+            if (valid) {
+                if (!current.answer || current.answer.trim().length === 0) {
+                    finalValid = false;
+                    reason = 'Resposta vazia';
+                } else if (current.answer.trim().length === 1) {
+                    finalValid = true;
+                    reason = 'Resposta com uma letra';
+                } else {
+                    finalValid = true;
+                    reason = 'Resposta válida';
+                }
+            } else {
+                finalValid = false;
+                reason = 'Resposta inválida';
             }
 
-            // Marcar resposta como validada
-            currentPlayer.answers[currentThemeIndex].validated = true;
-            currentPlayer.answers[currentThemeIndex].judgeValidation = valid; // Salvar decisão do juiz
-
-            console.log(`[Validation] Answer judged: ${valid ? 'VALID' : 'INVALID'} - Player: ${currentPlayer.nickname}, Theme: ${config.themes[currentThemeIndex]}`);
-
-            // Próximo jogador no mesmo tema
-            validation.currentPlayerIndex++;
+            console.log(`[Validation] Answer judged: ${finalValid ? 'VALID' : 'INVALID'} - Player: ${current.playerNickname}, Theme: ${current.theme}, Reason: ${reason}`);
             
-            // Se validamos todos os jogadores no tema atual
-            if (validation.currentPlayerIndex >= validation.answers.length) {
-                // Aplicar sistema de pontuação para o tema atual
-                applyScoring(validation.answers, currentThemeIndex);
-                
-                // Resetar para o primeiro jogador
-                validation.currentPlayerIndex = 0;
-                // Próximo tema
+            // CORREÇÃO: Encontrar e atualizar a resposta corretamente
+            const playerAnswers = validation.answers.find(p => p.id === current.playerId);
+            if (playerAnswers && playerAnswers.answers) {
+                const answerIndex = playerAnswers.answers.findIndex(a => a.theme === current.theme);
+                if (answerIndex !== -1) {
+                    playerAnswers.answers[answerIndex].valid = finalValid;
+                    playerAnswers.answers[answerIndex].reason = reason;
+                    console.log(`[Validation] Answer updated for player ${current.playerNickname}, theme ${current.theme}`);
+                } else {
+                    console.error(`[Validation] Answer not found for theme ${current.theme}`);
+                }
+            } else {
+                console.error(`[Validation] Player answers not found for ${current.playerId}`);
+            }
+
+            // Avançar para próxima validação
+            validation.currentIndex++;
+            
+            if (validation.currentIndex < validation.queue.length) {
+                // Continuar para próxima validação
+                const next = validation.queue[validation.currentIndex];
+                console.log(`[Validation] Next validation: ${next.playerNickname} - ${next.theme}`);
+                io.to(room).emit('answer_validated', { current: next });
+            } else {
+                // Verificar se terminamos o tema atual
                 validation.currentThemeIndex++;
                 
-                // Se terminamos todos os temas, finalizar validação
-                if (validation.currentThemeIndex >= config.themes.length) {
+                if (validation.currentThemeIndex < config.themes.length) {
+                    // Aplicar pontuação para o tema atual
+                    applyThemeScoring(room, validation.currentThemeIndex - 1, validation.answers, config.themes);
+                    
+                    // Próximo tema
+                    const nextTheme = config.themes[validation.currentThemeIndex];
+                    validation.queue = validation.answers.map(player => ({
+                        playerId: player.id,
+                        playerNickname: player.nickname,
+                        theme: nextTheme,
+                        answer: player.answers[validation.currentThemeIndex]?.answer || "",
+                        themeIndex: validation.currentThemeIndex,
+                        currentPlayerIndex: 0,
+                        totalPlayers: validation.answers.length,
+                        totalThemes: config.themes.length
+                    }));
+                    
+                    validation.currentIndex = 0;
+                    
+                    const firstOfNextTheme = validation.queue[0];
+                    console.log(`[Validation] Next theme: ${nextTheme}, starting with ${firstOfNextTheme.playerNickname}`);
+                    io.to(room).emit('answer_validated', { current: firstOfNextTheme });
+                    
+                } else {
+                    // Aplicar pontuação para o último tema
+                    applyThemeScoring(room, validation.currentThemeIndex - 1, validation.answers, config.themes);
+                    
+                    // Finalizar validação
                     console.log(`[Validation] All themes completed! Finalizing validation for room ${room}`);
                     
                     // Calcular pontuações finais
                     validation.answers.forEach(player => {
                         const roundScore = player.answers.reduce((sum, a) => sum + (a.points || 0), 0);
                         
-                        console.log(`[Validation] Processing player ${player.nickname} (${player.id}) with score ${roundScore}`);
+                        // Atualizar score global do jogador
+                        if (!roomState.playerScores) {
+                            roomState.playerScores = new Map();
+                        }
                         
-                        // CORRIGIDO: Buscar socket pela room e userId
+                        const currentTotalScore = roomState.playerScores.get(player.id) || 0;
+                        const newTotalScore = currentTotalScore + roundScore;
+                        roomState.playerScores.set(player.id, newTotalScore);
+                        
+                        console.log(`[Validation] Player ${player.nickname}: Round ${roundScore}, Total ${newTotalScore}`);
+                        
+                        // Buscar socket do jogador
                         const playerSockets = Array.from(io.sockets.sockets.values()).filter(s => 
                             s.room === room && s.userId === player.id
                         );
-                        
-                        console.log(`[Validation] Found ${playerSockets.length} socket(s) for player ${player.id}`);
                         
                         if (playerSockets.length > 0) {
                             playerSockets.forEach(targetSocket => {
                                 targetSocket.emit("validation_complete", { 
                                     myScore: roundScore,
+                                    myTotalScore: newTotalScore,
                                     myAnswers: player.answers
                                 });
-                                console.log(`[Validation] ✅ Sent individual results to ${player.nickname}: ${roundScore} points`);
+                                console.log(`[Validation] ✅ Sent results to ${player.nickname}: Round ${roundScore}, Total ${newTotalScore}`);
                             });
                         } else {
-                            console.warn(`[Validation] ⚠️ No socket found for player ${player.nickname} (${player.id})`);
-                            
-                            // Fallback: emitir para toda a sala com filtro no frontend
+                            console.warn(`[Validation] ⚠️ No socket found for player ${player.nickname}`);
                             io.to(room).emit("validation_complete_for_player", {
                                 playerId: player.id,
                                 myScore: roundScore,
+                                myTotalScore: newTotalScore,
                                 myAnswers: player.answers
                             });
                         }
@@ -792,107 +951,105 @@ io.on('connection', (socket) => {
                     // Limpar validação
                     roomState.currentValidation = null;
                     console.log(`[Validation] Validation completed for room ${room}`);
-                    return;
                 }
             }
-
-            // Emitir próxima resposta para validação
-            const nextPlayer = validation.answers[validation.currentPlayerIndex];
-            const nextTheme = config.themes[validation.currentThemeIndex];
             
-            console.log(`[Validation] Next validation: ${nextPlayer.nickname} - ${nextTheme}`);
-            
-            io.to(room).emit("answer_validated", {
-                current: {
-                    playerId: nextPlayer.id,
-                    playerNickname: nextPlayer.nickname,
-                    themeIndex: validation.currentThemeIndex,
-                    theme: nextTheme,
-                    answer: nextPlayer.answers[validation.currentThemeIndex]?.answer || "",
-                    validated: false,
-                    totalPlayers: validation.answers.length,
-                    currentPlayerIndex: validation.currentPlayerIndex,
-                    totalThemes: config.themes.length,
-                    isLastAnswerOfTheme: validation.currentPlayerIndex === validation.answers.length - 1,
-                    isLastAnswerOfGame: validation.currentThemeIndex === config.themes.length - 1 && validation.currentPlayerIndex === validation.answers.length - 1
-                }
-            });
-
         } catch (error) {
             console.error('[Validation] Error in validate_answer:', error);
-            socket.emit("error", { 
-                message: "Erro na validação",
-                details: error.message 
-            });
+            console.error('[Validation] Stack trace:', error.stack);
         }
     });
 
     socket.on("new_round", async ({ room }) => {
         try {
-            const config = roomConfigs[room];
-            if (!config || socket.userId !== config.creatorId) {
-                throw new Error("Unauthorized new_round attempt");
-            }
-
             console.log(`[Socket.io] Starting new round for room ${room}`);
-
-            // Resetar estados da sala
-            initializeRoomState(room);
-            config.roundActive = false;
-            config.roundEnded = false;
-            config.currentLetter = null;
-            config.stopClickedByMe = null;
-
-            await saveRoomConfigToFirestore(room, config);
-            emitRoomConfig(room, config);
-
-            // Notificar todos os jogadores
-            io.to(room).emit("new_round_started");
-
-        } catch (error) {
-            console.error('[Socket.io] Error starting new round:', error);
-            socket.emit("error", { message: error.message });
-        }
-    });
-
-    socket.on("end_game", ({ room }) => {
-        try {
+            
             const config = roomConfigs[room];
-            if (!config || socket.userId !== config.creatorId) {
-                console.log('[Socket.io] Unauthorized end_game attempt');
+            if (!config) {
+                console.error(`[Socket.io] Room config not found for ${room}`);
                 return;
             }
 
-            console.log(`[Socket.io] Ending game for room ${room}`);
-
-            // Calcular ranking final
-            const playersInRoom = Object.values(players).filter(p => p.room === room);
-            const finalRanking = playersInRoom.map(player => ({
-                playerId: player.userId,
-                nickname: player.nickname,
-                totalScore: roomOverallScores[room]?.[player.userId] || 0
-            }));
-
-            // Emitir ranking final
-            io.to(room).emit("game_ended", finalRanking);
-
-            // Limpar estados do jogo
-            gameState.delete(room);
-            delete stopCallers[room];
-            delete validationStates[room];
-            delete roomOverallScores[room];
-
-            // Resetar configuração da sala
+            // Reset room state for new round
             config.roundActive = false;
             config.roundEnded = false;
+            config.stopClickedByMe = false;
             config.currentLetter = null;
-            config.stopClickedByMe = null;
             
-            saveRoomConfigToFirestore(room, config);
-            emitRoomConfig(room, config);
+            // Clear game state for new round
+            if (gameState.has(room)) {
+                const roomState = gameState.get(room);
+                roomState.answers.clear();
+                roomState.currentValidation = null;
+                // Manter playerScores para acumular entre rodadas
+            }
 
+            // Save updated config
+            await saveRoomConfigToFirestore(room, config);
+
+            // CORREÇÃO: Emitir evento específico para nova rodada iniciada
+            io.to(room).emit("new_round_started", {
+                message: "Nova rodada iniciada!",
+                themes: config.themes
+            });
+            
+            // Emitir configuração atualizada
+            emitRoomConfig(room, config);
+            
+            console.log(`[Socket.io] New round initiated for room ${room}`);
+            
         } catch (error) {
-            console.error('[Socket.io] Error ending game:', error);
+            console.error('[Socket.io] Error starting new round:', error);
+        }
+    });
+
+    socket.on('end_game', ({ room }) => {
+        try {
+            console.log(`[Socket.io] Game ended for room ${room}`);
+            
+            const roomState = gameState.get(room);
+            if (!roomState) return;
+
+            // CORREÇÃO: Criar ranking com scores totais
+            const ranking = [];
+            
+            if (roomState.playerScores && roomState.playerScores.size > 0) {
+                // Usar scores salvos
+                for (const [playerId, totalScore] of roomState.playerScores.entries()) {
+                    const player = Object.values(players).find(p => p.userId === playerId);
+                    if (player) {
+                        ranking.push({
+                            playerId: playerId,
+                            nickname: player.nickname,
+                            totalScore: totalScore
+                        });
+                    }
+                }
+            } else {
+                // Fallback: usar players atuais com score 0
+                Object.values(players)
+                    .filter(p => p.room === room)
+                    .forEach(player => {
+                        ranking.push({
+                            playerId: player.userId,
+                            nickname: player.nickname,
+                            totalScore: 0
+                        });
+                    });
+            }
+
+            // Ordenar ranking por pontuação
+            ranking.sort((a, b) => b.totalScore - a.totalScore);
+            
+            console.log(`[Socket.io] Final ranking for room ${room}:`, ranking);
+            
+            io.to(room).emit('game_ended', ranking);
+            
+            // Limpar estado da sala
+            gameState.delete(room);
+            
+        } catch (error) {
+            console.error('[Socket.io] Error in end_game:', error);
         }
     });
 

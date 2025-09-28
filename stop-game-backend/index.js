@@ -960,7 +960,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on("new_round", async ({ room }) => {
+    socket.on("new_round", async ({ room, resetLetters = false }) => {
         try {
             console.log(`[Socket.io] Starting new round for room ${room}`);
             
@@ -968,6 +968,12 @@ io.on('connection', (socket) => {
             if (!config) {
                 console.error(`[Socket.io] Room config not found for ${room}`);
                 return;
+            }
+
+            // OPCIONAL: Reset das letras se solicitado
+            if (resetLetters) {
+                clearRoomLetters(room);
+                console.log(`[Socket.io] Letter cycle reset for room ${room}`);
             }
 
             // Reset room state for new round
@@ -981,19 +987,15 @@ io.on('connection', (socket) => {
                 const roomState = gameState.get(room);
                 roomState.answers.clear();
                 roomState.currentValidation = null;
-                // Manter playerScores para acumular entre rodadas
             }
 
-            // Save updated config
             await saveRoomConfigToFirestore(room, config);
 
-            // CORREÇÃO: Emitir evento específico para nova rodada iniciada
             io.to(room).emit("new_round_started", {
                 message: "Nova rodada iniciada!",
                 themes: config.themes
             });
             
-            // Emitir configuração atualizada
             emitRoomConfig(room, config);
             
             console.log(`[Socket.io] New round initiated for room ${room}`);
@@ -1010,11 +1012,10 @@ io.on('connection', (socket) => {
             const roomState = gameState.get(room);
             if (!roomState) return;
 
-            // CORREÇÃO: Criar ranking com scores totais
+            // Criar ranking com scores totais
             const ranking = [];
             
             if (roomState.playerScores && roomState.playerScores.size > 0) {
-                // Usar scores salvos
                 for (const [playerId, totalScore] of roomState.playerScores.entries()) {
                     const player = Object.values(players).find(p => p.userId === playerId);
                     if (player) {
@@ -1026,7 +1027,6 @@ io.on('connection', (socket) => {
                     }
                 }
             } else {
-                // Fallback: usar players atuais com score 0
                 Object.values(players)
                     .filter(p => p.room === room)
                     .forEach(player => {
@@ -1038,7 +1038,6 @@ io.on('connection', (socket) => {
                     });
             }
 
-            // Ordenar ranking por pontuação
             ranking.sort((a, b) => b.totalScore - a.totalScore);
             
             console.log(`[Socket.io] Final ranking for room ${room}:`, ranking);
@@ -1047,6 +1046,9 @@ io.on('connection', (socket) => {
             
             // Limpar estado da sala
             gameState.delete(room);
+            
+            // NOVO: Limpar letras usadas da sala
+            clearRoomLetters(room);
             
         } catch (error) {
             console.error('[Socket.io] Error in end_game:', error);
@@ -1205,3 +1207,91 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
+
+// Adicione estas variáveis globais no topo do arquivo, após as outras declarações:
+
+// Sistema de sorteio de letras sem repetição
+const roomLettersUsed = new Map(); // Armazena letras já usadas por sala
+
+// Todas as letras do alfabeto
+const ALL_LETTERS = [
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 
+    'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 
+    'U', 'V', 'W', 'X', 'Y', 'Z'
+];
+
+// Função para sortear letra sem repetição
+function getRandomLetterForRoom(room) {
+    // Inicializar array de letras usadas se não existir
+    if (!roomLettersUsed.has(room)) {
+        roomLettersUsed.set(room, []);
+    }
+    
+    const usedLetters = roomLettersUsed.get(room);
+    const availableLetters = ALL_LETTERS.filter(letter => !usedLetters.includes(letter));
+    
+    // Se todas as letras foram usadas, reiniciar o ciclo
+    if (availableLetters.length === 0) {
+        console.log(`[Letter System] Todas as letras foram usadas na sala ${room}. Reiniciando ciclo.`);
+        roomLettersUsed.set(room, []);
+        return getRandomLetterForRoom(room); // Recursão para sortear novamente
+    }
+    
+    // Sortear uma letra disponível
+    const randomIndex = Math.floor(Math.random() * availableLetters.length);
+    const selectedLetter = availableLetters[randomIndex];
+    
+    // Adicionar à lista de letras usadas
+    usedLetters.push(selectedLetter);
+    roomLettersUsed.set(room, usedLetters);
+    
+    console.log(`[Letter System] Sala ${room}: Letra sorteada '${selectedLetter}'. Letras usadas: [${usedLetters.join(', ')}]. Restantes: ${26 - usedLetters.length}`);
+    
+    return selectedLetter;
+}
+
+// Função para limpar letras usadas de uma sala (quando sala é deletada)
+function clearRoomLetters(room) {
+    if (roomLettersUsed.has(room)) {
+        roomLettersUsed.delete(room);
+        console.log(`[Letter System] Letras usadas da sala ${room} foram limpas.`);
+    }
+}
+
+// Encontre a função startRoundCountdown e substitua a linha do sorteio da letra:
+
+function startRoundCountdown(room) {
+    const config = roomConfigs[room];
+    if (!config) return;
+
+    console.log(`[Socket.io] Starting countdown for room ${room}`);
+    
+    let countdown = 5;
+    config.isCountingDown = true;
+    
+    const countdownInterval = setInterval(async () => {
+        io.to(room).emit("round_start_countdown", { countdown });
+        
+        countdown--;
+        
+        if (countdown < 0) {
+            clearInterval(countdownInterval);
+            config.isCountingDown = false;
+
+            // CORREÇÃO: Usar o novo sistema de sorteio sem repetição
+            const letter = getRandomLetterForRoom(room);
+            
+            config.currentLetter = letter;
+            config.roundActive = true;
+            config.roundEnded = false;
+            config.stopClickedByMe = false;
+            
+            await saveRoomConfigToFirestore(room, config);
+            
+            io.to(room).emit("round_started", { letter });
+            emitRoomConfig(room, config);
+            
+            console.log(`[Socket.io] Round started for room ${room} with letter ${letter}`);
+        }
+    }, 1000);
+}

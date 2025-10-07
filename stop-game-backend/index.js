@@ -40,11 +40,6 @@ testFirestore();
 const app = express();
 
 // Configuração das origens permitidas (CORS)
-const allowedOrigins = process.env.NODE_ENV === 'production'
-    ? ['https://stop-paper.netlify.app']
-    : ['http://localhost:5173', 'https://stop-paper.netlify.app'];
-
-// Na configuração do CORS, adicione os domínios corretos:
 const corsOptions = {
   origin: [
     "http://localhost:5173",
@@ -154,11 +149,8 @@ function emitRoomConfig(roomId, config) {
 // Estado do servidor
 // ------------------------
 const players = {};
-const stopCallers = {};
-const validationStates = {};
 const roomConfigs = {};
-const roomOverallScores = {}; // Overall scores for the entire game
-const playerDisconnectionTimers = {}; // Mantenha um mapa de temporizadores de desconexão para admins
+const playerDisconnectionTimers = {};
 
 // Game utilities
 const gameUtils = {
@@ -175,6 +167,47 @@ const gameUtils = {
 const gameState = new Map();
 const roomsAnswers = new Map();
 
+// Sistema de sorteio de letras sem repetição
+const roomLettersUsed = new Map();
+const ALL_LETTERS = [
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 
+    'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 
+    'U', 'V', 'W', 'X', 'Y', 'Z'
+];
+
+// Função para sortear letra sem repetição
+function getRandomLetterForRoom(room) {
+    if (!roomLettersUsed.has(room)) {
+        roomLettersUsed.set(room, []);
+    }
+    
+    const usedLetters = roomLettersUsed.get(room);
+    const availableLetters = ALL_LETTERS.filter(letter => !usedLetters.includes(letter));
+    
+    if (availableLetters.length === 0) {
+        console.log(`[Letter System] Todas as letras foram usadas na sala ${room}. Reiniciando ciclo.`);
+        roomLettersUsed.set(room, []);
+        return getRandomLetterForRoom(room);
+    }
+    
+    const randomIndex = Math.floor(Math.random() * availableLetters.length);
+    const selectedLetter = availableLetters[randomIndex];
+    
+    usedLetters.push(selectedLetter);
+    roomLettersUsed.set(room, usedLetters);
+    
+    console.log(`[Letter System] Sala ${room}: Letra sorteada '${selectedLetter}'. Letras usadas: [${usedLetters.join(', ')}]. Restantes: ${26 - usedLetters.length}`);
+    
+    return selectedLetter;
+}
+
+function clearRoomLetters(room) {
+    if (roomLettersUsed.has(room)) {
+        roomLettersUsed.delete(room);
+        console.log(`[Letter System] Letras usadas da sala ${room} foram limpas.`);
+    }
+}
+
 // Função para inicializar estado da sala
 function initializeRoomState(room) {
     if (!gameState.has(room)) {
@@ -187,6 +220,51 @@ function initializeRoomState(room) {
     if (!roomsAnswers.has(room)) {
         roomsAnswers.set(room, []);
     }
+}
+
+// CORREÇÃO: Função startRoundCountdown com controle de estado
+function startRoundCountdown(room) {
+    const config = roomConfigs[room];
+    if (!config) {
+        console.log(`[Countdown] No config found for room ${room}`);
+        return;
+    }
+
+    // CORREÇÃO: Verificar se já está em countdown para evitar múltiplas execuções
+    if (config.isCountingDown) {
+        console.log(`[Countdown] Countdown already in progress for room ${room}`);
+        return;
+    }
+
+    console.log(`[Countdown] Starting countdown for room ${room}`);
+    
+    let countdown = 3;
+    config.isCountingDown = true;
+    
+    const countdownInterval = setInterval(async () => {
+        console.log(`[Countdown] Emitting countdown ${countdown} for room ${room}`);
+        io.to(room).emit("round_start_countdown", { countdown });
+        
+        countdown--;
+        
+        if (countdown < 0) {
+            clearInterval(countdownInterval);
+            config.isCountingDown = false;
+
+            const letter = getRandomLetterForRoom(room);
+            
+            config.currentLetter = letter;
+            config.roundActive = true;
+            config.roundEnded = false;
+            config.stopClickedByMe = false;
+            
+            await saveRoomConfigToFirestore(room, config);
+            
+            console.log(`[Countdown] Round started for room ${room} with letter ${letter}`);
+            io.to(room).emit("round_started", { letter });
+            emitRoomConfig(room, config); // CORREÇÃO: Mudado de roomId para room
+        }
+    }, 1000);
 }
 
 // Função startValidation
@@ -205,26 +283,22 @@ function startValidation(room) {
         const answers = Array.from(roomState.answers.values());
         if (answers.length === 0) {
             console.log(`[Validation] No answers to validate in room ${room}`);
+            io.to(room).emit("no_answers_to_validate");
             return;
         }
 
-        // DEBUG: Log dos jogadores conectados na sala
-        const connectedSockets = Array.from(io.sockets.sockets.values())
-            .filter(s => s.room === room)
-            .map(s => ({ id: s.userId, socketId: s.id }));
-        console.log(`[Validation] Connected sockets in room ${room}:`, connectedSockets);
-
-        // CORREÇÃO: Inicializar completamente currentValidation com queue
         const firstTheme = config.themes[0];
         const validationQueue = [];
         
-        // Criar queue com todos os jogadores para o primeiro tema
         answers.forEach((playerData, index) => {
+            const firstAnswer = playerData.answers[0];
+            const answerText = firstAnswer ? firstAnswer.answer : "";
+            
             validationQueue.push({
                 playerId: playerData.id,
                 playerNickname: playerData.nickname,
                 theme: firstTheme,
-                answer: playerData.answers[0]?.answer || "",
+                answer: answerText,
                 themeIndex: 0,
                 currentPlayerIndex: index,
                 totalPlayers: answers.length,
@@ -232,18 +306,15 @@ function startValidation(room) {
             });
         });
 
-        console.log(`[Validation] Created queue with ${validationQueue.length} items for theme: ${firstTheme}`);
-
         roomState.currentValidation = {
             currentThemeIndex: 0,
             currentPlayerIndex: 0,
-            currentIndex: 0,  // IMPORTANTE: Inicializar currentIndex
-            queue: validationQueue,  // IMPORTANTE: Definir a queue
+            currentIndex: 0,
+            queue: validationQueue,
             answers: answers
         };
 
         const firstValidation = validationQueue[0];
-        console.log(`[Validation] Emitting start_validation for room ${room} - Theme: ${firstTheme}, Player: ${firstValidation.playerNickname}`);
         
         io.to(room).emit("start_validation", {
             current: firstValidation,
@@ -255,80 +326,12 @@ function startValidation(room) {
     }
 }
 
-// Sistema de pontuação inteligente
-function applyScoring(allAnswers, themeIndex) {
-    try {
-        console.log(`[Scoring] Aplicando pontuação para tema ${themeIndex}`);
-        
-        // Agrupar respostas por similaridade (normalizado)
-        const answerGroups = new Map();
-        
-        allAnswers.forEach(player => {
-            const answer = player.answers[themeIndex];
-            if (!answer) return;
-            
-            const normalizedAnswer = normalizeAnswer(answer.answer);
-            const judgeValid = answer.judgeValidation;
-            
-            // Se foi invalidada pelo juiz, pontuação 0
-            if (judgeValid === false) {
-                answer.points = 0;
-                answer.reason = "Invalidada pelo juiz";
-                return;
-            }
-            
-            // Se resposta vazia ou muito curta, pontuação 0
-            if (!normalizedAnswer || normalizedAnswer.length < 2) {
-                answer.points = 0;
-                answer.reason = "Resposta vazia ou muito curta";
-                return;
-            }
-            
-            // Agrupar por resposta normalizada
-            if (!answerGroups.has(normalizedAnswer)) {
-                answerGroups.set(normalizedAnswer, []);
-            }
-            answerGroups.get(normalizedAnswer).push({ player, answer });
-        });
-        
-        // Aplicar pontuação baseada na quantidade de jogadores com a mesma resposta
-        answerGroups.forEach((group, normalizedAnswer) => {
-            let points = 0;
-            let reason = "";
-            
-            if (group.length === 1) {
-                // Resposta única
-                points = 100;
-                reason = "Resposta única";
-            } else {
-                // Resposta duplicada
-                points = 50;
-                reason = `Resposta repetida (${group.length} jogadores)`;
-            }
-            
-            // Aplicar pontuação para todos do grupo
-            group.forEach(({ answer }) => {
-                answer.points = points;
-                answer.reason = reason;
-            });
-            
-            console.log(`[Scoring] Resposta "${normalizedAnswer}" - ${group.length} jogador(es) - ${points} pontos cada`);
-        });
-        
-        console.log(`[Scoring] Pontuação aplicada para tema ${themeIndex}`);
-        
-    } catch (error) {
-        console.error('[Scoring] Erro ao aplicar pontuação:', error);
-    }
-}
-
 // Sistema de pontuação inteligente por tema
 function applyThemeScoring(room, themeIndex, allAnswers, themes) {
     try {
         const themeName = themes[themeIndex];
         console.log(`[Scoring] Aplicando pontuação para tema ${themeIndex}: ${themeName}`);
         
-        // Coletar todas as respostas para este tema específico
         const themeAnswers = [];
         allAnswers.forEach(player => {
             const answer = player.answers[themeIndex];
@@ -341,16 +344,13 @@ function applyThemeScoring(room, themeIndex, allAnswers, themes) {
             }
         });
         
-        // Primeiro passo: tratar respostas inválidas
         themeAnswers.forEach(({ answer, normalizedAnswer }) => {
-            // Se foi invalidada pelo juiz, pontuação 0
             if (answer.valid === false) {
                 answer.points = 0;
                 answer.reason = "Invalidada pelo juiz";
                 return;
             }
             
-            // Se resposta vazia, pontuação 0
             if (!normalizedAnswer || normalizedAnswer.length === 0) {
                 answer.points = 0;
                 answer.reason = "Resposta vazia";
@@ -358,41 +358,31 @@ function applyThemeScoring(room, themeIndex, allAnswers, themes) {
             }
         });
 
-        // Segundo passo: agrupar respostas VÁLIDAS por similaridade (normalizado)
         const answerGroups = new Map();
         
         themeAnswers.forEach(({ player, answer, normalizedAnswer }) => {
-            // Pular respostas já pontuadas (inválidas)
             if (answer.points !== null) return;
             
-            // CORREÇÃO: Não tratar respostas de 1 letra separadamente
-            // Todas as respostas válidas (incluindo de 1 letra) devem ser agrupadas
-            
-            // Agrupar por resposta normalizada
             if (!answerGroups.has(normalizedAnswer)) {
                 answerGroups.set(normalizedAnswer, []);
             }
             answerGroups.get(normalizedAnswer).push({ player, answer });
         });
         
-        // Terceiro passo: aplicar pontuação baseada na quantidade de jogadores com a mesma resposta
         answerGroups.forEach((group, normalizedAnswer) => {
             let points = 0;
             let reason = "";
             
             if (group.length === 1) {
-                // Resposta única (incluindo respostas de 1 letra únicas)
                 points = 100;
                 reason = normalizedAnswer.length === 1 ? "Resposta única (uma letra)" : "Resposta única";
             } else {
-                // Resposta duplicada (incluindo respostas de 1 letra duplicadas)  
                 points = 50;
                 reason = normalizedAnswer.length === 1 ? 
                     `Resposta repetida - uma letra (${group.length} jogadores)` :
                     `Resposta repetida (${group.length} jogadores)`;
             }
             
-            // Aplicar pontuação para todos do grupo
             group.forEach(({ answer }) => {
                 answer.points = points;
                 answer.reason = reason;
@@ -400,8 +390,6 @@ function applyThemeScoring(room, themeIndex, allAnswers, themes) {
             
             console.log(`[Scoring] Tema ${themeName} - Resposta "${normalizedAnswer}" - ${group.length} jogador(es) - ${points} pontos cada`);
         });
-        
-        console.log(`[Scoring] Pontuação aplicada para tema ${themeIndex}: ${themeName}`);
         
     } catch (error) {
         console.error(`[Scoring] Erro ao aplicar pontuação para tema ${themeIndex}:`, error);
@@ -412,234 +400,138 @@ function applyThemeScoring(room, themeIndex, allAnswers, themes) {
 io.on('connection', (socket) => {
     console.log(`[Socket.io] Nova conexão: ${socket.id}`);
 
-    // JOIN ROOM - Corrigido para garantir primeiro jogador como admin
-    socket.on('join_room', async ({ userId, room, nickname }) => {
+    socket.on('join_room', async (data) => {
         try {
-            console.log(`[Backend Log - join_room] Tentativa de entrada: userId=${userId}, roomId=${room}, nickname=${nickname}`);
-
-            if (!userId || !room || !nickname) {
-                throw new Error("Dados obrigatórios não fornecidos");
+            const roomId = data.roomId || data.room;
+            const nickname = data.nickname;
+            const userId = data.userId;
+            
+            console.log(`[Backend Log - join_room] Tentativa de entrada: userId=${userId}, roomId=${roomId}, nickname=${nickname}`);
+            
+            if (!roomId || !nickname || !userId) {
+                console.error(`[Backend Log - join_room] Dados inválidos`);
+                socket.emit('error', { message: 'Dados inválidos para entrar na sala' });
+                return;
             }
 
             socket.userId = userId;
-            socket.room = room;
-            socket.join(room);
+            socket.nickname = nickname;
+            socket.room = roomId;
+            socket.join(roomId);
 
-            // Inicializar estado da sala
-            initializeRoomState(room);
+            const socketsInRoom = await io.in(roomId).fetchSockets();
+            const connectedUserIds = socketsInRoom.map(s => s.userId).filter(Boolean);
 
-            // Verificar quantos jogadores já estão na sala EM MEMÓRIA
-            const playersCurrentlyInRoom = Object.values(players).filter(p => p.room === room);
-            console.log(`[Backend Log - join_room] Jogadores já na sala ${room} em memória:`, playersCurrentlyInRoom.length);
-
-            // Verificar se a sala existe no Firestore
-            let config = await getRoomConfigFromFirestore(room);
-            let isCreator = false;
-            let isSaved = false;
-
-            if (!config) {
-                // Nova sala - primeiro jogador é sempre admin
-                console.log(`[Backend Log - ADMIN ASSIGN] Sala ${room} não existe. ${nickname} (${userId}) é o CRIADOR da nova sala.`);
-                
-                config = {
-                    roomId: room,
-                    creatorId: userId, // Primeiro jogador é sempre o criador
-                    themes: ['País', 'Cidade', 'Nome', 'Animal', 'Cor', 'Marca'],
-                    duration: 60,
+            let roomConfig = await getRoomConfigFromFirestore(roomId);
+            
+            if (!roomConfig) {
+                console.log(`[Backend Log - join_room] Criando nova sala ${roomId}`);
+                roomConfig = {
+                    themes: ['País', 'Cidade', 'Nome', 'Animal', 'Cor', 'Marca', 'CEP', 'Objeto', 'Fruta'],
+                    duration: 180,
+                    creatorId: null,
                     roundActive: false,
                     roundEnded: false,
                     currentLetter: null,
-                    stopClickedByMe: null,
-                    isSaved: false, // Nova sala não salva por padrão
-                    players: []
+                    isSaved: false,
+                    isCountingDown: false, // CORREÇÃO: Adicionar controle de countdown
+                    createdAt: new Date(),
+                    players: {}
                 };
-                
-                isCreator = true;
-                isSaved = false;
-                await saveRoomConfigToFirestore(room, config);
             } else {
-                // Sala existe no Firestore
-                console.log(`[Backend Log - join_room] Sala ${room} encontrada no Firestore. creatorId: ${config.creatorId}`);
+                console.log(`[Backend Log - join_room] Sala ${roomId} encontrada no Firestore.`);
                 
-                // Verificar se há criador definido E se ele está online
-                const creatorOnline = config.creatorId ? Object.values(players).some(p => p.userId === config.creatorId && p.room === room) : false;
+                // CORREÇÃO: Sempre resetar estados de rodada para novos jogadores
+                roomConfig.roundActive = false;
+                roomConfig.roundEnded = false;
+                roomConfig.currentLetter = null;
+                roomConfig.isCountingDown = false;
                 
-                if (!config.creatorId || (!creatorOnline && playersCurrentlyInRoom.length === 0)) {
-                    // Não há criador OU criador não está online E é o primeiro a entrar
-                    console.log(`[Backend Log - ADMIN ASSIGN] Sala ${room}: Sem criador ativo. ${nickname} (${userId}) é o NOVO CRIADOR.`);
-                    config.creatorId = userId;
-                    isCreator = true;
-                    await saveRoomConfigToFirestore(room, config);
-                } else {
-                    // Há criador definido e ativo
-                    isCreator = userId === config.creatorId;
-                    console.log(`[Backend Log - ADMIN ASSIGN] ${nickname} (${userId}) ${isCreator ? 'É o CRIADOR' : 'NÃO é criador'} da sala ${room}. Criador atual: ${config.creatorId}`);
-                }
+                const currentPlayers = roomConfig.players || {};
+                const validPlayers = {};
                 
-                isSaved = config.isSaved || false;
+                Object.values(currentPlayers).forEach(player => {
+                    if (connectedUserIds.includes(player.userId) || player.userId === userId) {
+                        validPlayers[player.userId] = player;
+                    }
+                });
+                
+                roomConfig.players = validPlayers;
             }
 
-            roomConfigs[room] = config;
-
-            // Cancelar timer de desconexão se for admin reconectando
-            if (isCreator && playerDisconnectionTimers[userId]) {
-                clearTimeout(playerDisconnectionTimers[userId]);
-                delete playerDisconnectionTimers[userId];
-                console.log(`[Socket.io] Admin ${userId} reconectou. Timer de desconexão cancelado.`);
+            let isCreator = false;
+            const existingPlayers = Object.values(roomConfig.players);
+            const hasActiveAdmin = existingPlayers.some(p => p.isCreator && connectedUserIds.includes(p.userId));
+            
+            if (!hasActiveAdmin || existingPlayers.length === 0) {
+                console.log(`[Backend Log - ADMIN ASSIGN] ${nickname} (${userId}) será o ADMIN da sala ${roomId}`);
+                roomConfig.creatorId = userId;
+                isCreator = true;
+                
+                Object.values(roomConfig.players).forEach(p => p.isCreator = false);
+            } else {
+                isCreator = userId === roomConfig.creatorId;
+                console.log(`[Backend Log - ADMIN ASSIGN] ${nickname} (${userId}) ${isCreator ? 'É o ADMIN' : 'NÃO é criador'} da sala ${roomId}`);
             }
 
-            // Adicionar jogador à memória
-            players[userId] = {
+            roomConfig.players[userId] = {
                 userId,
                 nickname,
-                room,
+                isCreator,
                 socketId: socket.id,
-                isCreator
+                joinedAt: new Date()
             };
 
-            // Atualizar lista de players na config
-            const playersInRoomUpdated = Object.values(players).filter(p => p.room === room);
-            config.players = playersInRoomUpdated.map(p => ({
-                userId: p.userId,
-                nickname: p.nickname,
-                isCreator: p.isCreator
-            }));
+            roomConfigs[roomId] = roomConfig;
+            await saveRoomConfigToFirestore(roomId, roomConfig);
 
-            await saveRoomConfigToFirestore(room, config);
+            const playersArray = Object.values(roomConfig.players).sort((a, b) => {
+                if (a.isCreator && !b.isCreator) return -1;
+                if (!a.isCreator && b.isCreator) return 1;
+                return new Date(a.joinedAt) - new Date(b.joinedAt);
+            });
 
-            console.log(`[Backend Log - join_room] ✅ ${nickname} (${userId}) entrou na sala ${room}. É CRIADOR: ${isCreator ? 'SIM' : 'NÃO'}. Total de jogadores: ${playersInRoomUpdated.length}`);
+            console.log(`[Backend Log - join_room] ✅ ${nickname} entrou na sala ${roomId}. É ADMIN: ${isCreator ? 'SIM' : 'NÃO'}. Total: ${playersArray.length}`);
 
-            // Emitir eventos
             socket.emit('room_joined', {
-                room,
+                room: roomId,
                 player: {
                     userId,
                     nickname,
                     isCreator
                 },
-                players: config.players,
-                config: {
-                    themes: config.themes,
-                    duration: config.duration,
-                    creatorId: config.creatorId
-                },
-                roundStarted: config.roundActive || false,
-                roundEnded: config.roundEnded || false,
-                letter: config.currentLetter,
-                stopClickedByMe: config.stopClickedByMe === userId,
-                isSaved: isSaved
+                players: playersArray
             });
 
-            io.to(room).emit('players_update', config.players);
-            emitRoomConfig(room, config);
+            io.to(roomId).emit('players_update', playersArray);
+            emitRoomConfig(roomId, roomConfig);
 
         } catch (error) {
-            console.error('[Socket.io] Error joining room:', error);
-            socket.emit('room_error', { message: error.message });
+            console.error('[Backend Log - join_room] Erro:', error);
+            socket.emit('error', { message: 'Erro ao entrar na sala' });
         }
     });
 
-    // REJOIN ROOM - Corrigido
-    socket.on('rejoin_room', async ({ roomId, nickname, userId }) => {
+    socket.on('update_themes', async ({ room, themes }) => {
         try {
-            console.log(`[Backend Log - rejoin_room] Tentativa de reingresso: userId=${userId}, roomId=${roomId}, nickname=${nickname}`);
-
-            const config = await getRoomConfigFromFirestore(roomId);
-            if (!config) {
-                console.log(`[Backend Log - rejoin_room] Sala ${roomId} não encontrada no Firestore.`);
-                socket.emit('rejoin_room_fail');
+            const config = roomConfigs[room];
+            if (!config || socket.userId !== config.creatorId) {
+                console.log(`[Socket.io] Unauthorized theme update attempt by ${socket.userId}`);
                 return;
             }
 
-            console.log(`[Backend Log - rejoin_room] Sala ${roomId} encontrada no Firestore. creatorId: ${config.creatorId}`);
+            config.themes = themes;
+            config.isSaved = false;
 
-            socket.userId = userId;
-            socket.room = roomId;
-            socket.join(roomId);
-
-            // Reset estados para salas salvas
-            if (config.isSaved) {
-                console.log(`[Backend Log - rejoin_room] Resetando estado de rodada para sala salva ${roomId}.`);
-                config.roundActive = false;
-                config.roundEnded = false;
-                config.currentLetter = null;
-                config.stopClickedByMe = null;
-            }
-
-            roomConfigs[roomId] = config;
-            initializeRoomState(roomId);
-
-            // Verificar quantos jogadores já estão na sala EM MEMÓRIA  
-            const playersCurrentlyInRoom = Object.values(players).filter(p => p.room === roomId);
-            console.log(`[Backend Log - rejoin_room] Jogadores já na sala ${roomId} em memória:`, playersCurrentlyInRoom.length);
-
-            // Determinar se é criador
-            let isCreator = userId === config.creatorId;
-
-            // Se não há criador OU é o primeiro a entrar na sala
-            if (!config.creatorId || playersCurrentlyInRoom.length === 0) {
-                console.log(`[Backend Log - ADMIN ASSIGN] Rejoin: Sala ${roomId} sem criador ativo. ${nickname} (${userId}) é o NOVO CRIADOR.`);
-                config.creatorId = userId;
-                isCreator = true;
-                await saveRoomConfigToFirestore(roomId, config);
-            } else {
-                console.log(`[Backend Log - ADMIN ASSIGN] Rejoin: ${nickname} (${userId}) ${isCreator ? 'É o CRIADOR' : 'NÃO é criador'} da sala ${roomId}. Criador: ${config.creatorId}.`);
-            }
-
-            // Cancelar timer de desconexão se for admin
-            if (isCreator && playerDisconnectionTimers[userId]) {
-                clearTimeout(playerDisconnectionTimers[userId]);
-                delete playerDisconnectionTimers[userId];
-            }
-
-            // Adicionar/restaurar jogador
-            players[userId] = {
-                userId,
-                nickname,
-                room: roomId,
-                socketId: socket.id,
-                isCreator
-            };
-
-            // Atualizar lista de players
-            const playersInRoomUpdated = Object.values(players).filter(p => p.room === roomId);
-            config.players = playersInRoomUpdated.map(p => ({
-                userId: p.userId,
-                nickname: p.nickname,
-                isCreator: p.isCreator
-            }));
-
-            await saveRoomConfigToFirestore(roomId, config);
-
-            console.log(`[Backend Log - rejoin_room] ✅ ${nickname} (${userId}) reingressou na sala ${roomId}. É CRIADOR: ${isCreator ? 'SIM' : 'NÃO'}. Total: ${playersInRoomUpdated.length}`);
-
-            socket.emit('rejoin_room_success', {
-                room: {
-                    roomId,
-                    players: config.players,
-                    config: {
-                        themes: config.themes,
-                        duration: config.duration,
-                        creatorId: config.creatorId
-                    },
-                    roundStarted: config.roundActive || false,
-                    roundEnded: config.roundEnded || false,
-                    currentLetter: config.currentLetter,
-                    stopClickedByMe: config.stopClickedByMe === userId,
-                    isSaved: config.isSaved || false
-                },
-                player: {
-                    nickname,
-                    isCreator
-                }
-            });
-
-            io.to(roomId).emit('players_update', config.players);
-            emitRoomConfig(roomId, config);
+            await saveRoomConfigToFirestore(room, config);
+            
+            io.to(room).emit('themes_updated', { themes });
+            emitRoomConfig(room, config);
+            
+            console.log(`[Socket.io] Themes updated for room ${room}:`, themes);
 
         } catch (error) {
-            console.error('[Socket.io] Error rejoining room:', error);
-            socket.emit('rejoin_room_fail');
+            console.error('[Socket.io] Error updating themes:', error);
         }
     });
 
@@ -683,52 +575,28 @@ io.on('connection', (socket) => {
         }
     });
 
+    // CORREÇÃO: start_round com controle adequado
     socket.on('start_round', async ({ room }) => {
         try {
             const config = roomConfigs[room];
             if (!config || socket.userId !== config.creatorId) {
-                throw new Error("Unauthorized start_round attempt");
+                console.log(`[Socket.io] Unauthorized start_round attempt by ${socket.userId} in room ${room}`);
+                return;
             }
 
-            if (config.roundActive || config.roundEnded) {
-                throw new Error("Round already active or ended");
+            // CORREÇÃO: Verificar se já está ativo ou em countdown
+            if (config.roundActive || config.roundEnded || config.isCountingDown) {
+                console.log(`[Socket.io] Cannot start round - round already active/ended/counting in room ${room}`);
+                return;
             }
 
-            console.log(`[Socket.io] Starting countdown for room ${room}`);
-
-            // Emitir countdown
-            io.to(room).emit('round_start_countdown', { initialCountdown: 3 });
+            console.log(`[Socket.io] Admin ${socket.userId} starting round in room ${room}`);
+            
+            startRoundCountdown(room);
 
         } catch (error) {
             console.error('[Socket.io] Error starting round:', error);
             socket.emit('error', { message: error.message });
-        }
-    });
-
-    socket.on('start_game_actual', async ({ room }) => {
-        try {
-            const config = roomConfigs[room];
-            if (!config) {
-                throw new Error("Room config not found");
-            }
-
-            const letter = gameUtils.generateRandomLetter();
-            config.roundActive = true;
-            config.roundEnded = false;
-            config.currentLetter = letter;
-            config.stopClickedByMe = null;
-
-            initializeRoomState(room);
-
-            await saveRoomConfigToFirestore(room, config);
-
-            io.to(room).emit('round_started', { letter });
-            emitRoomConfig(room, config);
-
-            console.log(`[Socket.io] Round started for room ${room} with letter ${letter}`);
-
-        } catch (error) {
-            console.error('[Socket.io] Error in start_game_actual:', error);
         }
     });
 
@@ -741,9 +609,18 @@ io.on('connection', (socket) => {
             }
 
             const state = gameState.get(room);
+            const config = roomConfigs[room];
+            let nickname = "Unknown";
+            
+            if (socket.nickname) {
+                nickname = socket.nickname;
+            } else if (config && config.players && config.players[socket.userId]) {
+                nickname = config.players[socket.userId].nickname;
+            }
+            
             state.answers.set(socket.userId, {
                 id: socket.userId,
-                nickname: players[socket.userId]?.nickname || "Unknown",
+                nickname: nickname,
                 answers: answers.map(a => ({
                     theme: a.theme,
                     answer: a.answer || "",
@@ -752,7 +629,8 @@ io.on('connection', (socket) => {
                 }))
             });
 
-            console.log(`[Socket.io] Answers saved for player ${socket.userId} in room ${room}`);
+            console.log(`[Socket.io] Answers saved for player ${nickname} in room ${room}`);
+            
         } catch (error) {
             console.error('[Socket.io] Error saving answers:', error);
         }
@@ -767,27 +645,48 @@ io.on('connection', (socket) => {
             
             const config = roomConfigs[room];
             if (!config || !config.roundActive) {
-                throw new Error("Round not active");
+                console.log(`[Socket.io] Stop ignored - round not active in room ${room}`);
+                return; // CORREÇÃO: Retornar em vez de throw error
             }
 
-            // Update room state
+            // CORREÇÃO: Encontrar admin para ser o validador
+            const adminPlayer = Object.values(config.players).find(p => p.isCreator);
+            if (!adminPlayer) {
+                console.log(`[Socket.io] No admin found in room ${room}`);
+                return;
+            }
+
             config.roundActive = false;
             config.roundEnded = true;
             config.stopClickedByMe = socket.userId;
 
-            // Set validator
             if (!gameState.has(room)) {
                 initializeRoomState(room);
             }
-            gameState.get(room).validatorId = socket.userId;
+            gameState.get(room).validatorId = adminPlayer.userId; // CORREÇÃO: Admin como validador
 
             await saveRoomConfigToFirestore(room, config);
 
             io.to(room).emit("round_ended");
             emitRoomConfig(room, config);
 
-            // Start validation after delay
-            setTimeout(() => startValidation(room), 1500);
+            console.log(`[Socket.io] Round ended for room ${room}, admin ${adminPlayer.nickname} is validator`);
+
+            // CORREÇÃO: Aguardar um tempo para que todos enviem suas respostas
+            setTimeout(() => {
+                console.log(`[Socket.io] Iniciando validação após timeout na sala ${room}`);
+                const roomState = gameState.get(room);
+                const answers = Array.from(roomState.answers.values());
+                console.log(`[Socket.io] Respostas encontradas após timeout: ${answers.length}`);
+                
+                if (answers.length > 0) {
+                    startValidation(room);
+                } else {
+                    console.log(`[Socket.io] Ainda sem respostas na sala ${room} - emitindo no_answers_to_validate`);
+                    io.to(room).emit("no_answers_to_validate");
+                }
+            }, 2000); // CORREÇÃO: 2 segundos para aguardar respostas
+
         } catch (error) {
             console.error('[Socket.io] Error in stop_round:', error);
             socket.emit("error", { message: error.message });
@@ -799,11 +698,13 @@ io.on('connection', (socket) => {
         io.to(room).emit('reveal');
     });
 
-    // VALIDATE ANSWER - Movido para dentro do escopo do socket connection
+    socket.on('reveal_answer', ({ room }) => {
+        console.log(`[Socket.io] Reveal answer requested for room ${room}`);
+        io.to(room).emit('reveal');
+    });
+
     socket.on("validate_answer", async ({ valid, room }) => {
-        try {
-            console.log(`[Validation] Validate answer received: valid=${valid}, room=${room}`);
-            
+        try {            
             const roomState = gameState.get(room);
             const config = roomConfigs[room];
             
@@ -813,23 +714,8 @@ io.on('connection', (socket) => {
             }
 
             const validation = roomState.currentValidation;
-            
-            // CORREÇÃO: Verificar se currentIndex é válido
-            if (!validation.queue || validation.currentIndex >= validation.queue.length) {
-                console.error(`[Validation] Invalid validation state - currentIndex: ${validation.currentIndex}, queue length: ${validation.queue?.length || 0}`);
-                return;
-            }
-            
             const current = validation.queue[validation.currentIndex];
             
-            if (!current) {
-                console.error(`[Validation] No current validation item at index ${validation.currentIndex}`);
-                return;
-            }
-
-            console.log(`[Validation] Processing validation for: ${current.playerNickname} - ${current.theme} - "${current.answer}"`);
-
-            // Validar resposta
             let finalValid = valid;
             let reason = '';
             
@@ -837,9 +723,6 @@ io.on('connection', (socket) => {
                 if (!current.answer || current.answer.trim().length === 0) {
                     finalValid = false;
                     reason = 'Resposta vazia';
-                } else if (current.answer.trim().length === 1) {
-                    finalValid = true;
-                    reason = 'Resposta com uma letra';
                 } else {
                     finalValid = true;
                     reason = 'Resposta válida';
@@ -849,70 +732,53 @@ io.on('connection', (socket) => {
                 reason = 'Resposta inválida';
             }
 
-            console.log(`[Validation] Answer judged: ${finalValid ? 'VALID' : 'INVALID'} - Player: ${current.playerNickname}, Theme: ${current.theme}, Reason: ${reason}`);
-            
-            // CORREÇÃO: Encontrar e atualizar a resposta corretamente
             const playerAnswers = validation.answers.find(p => p.id === current.playerId);
             if (playerAnswers && playerAnswers.answers) {
                 const answerIndex = playerAnswers.answers.findIndex(a => a.theme === current.theme);
                 if (answerIndex !== -1) {
                     playerAnswers.answers[answerIndex].valid = finalValid;
                     playerAnswers.answers[answerIndex].reason = reason;
-                    console.log(`[Validation] Answer updated for player ${current.playerNickname}, theme ${current.theme}`);
-                } else {
-                    console.error(`[Validation] Answer not found for theme ${current.theme}`);
                 }
-            } else {
-                console.error(`[Validation] Player answers not found for ${current.playerId}`);
             }
 
-            // Avançar para próxima validação
             validation.currentIndex++;
             
             if (validation.currentIndex < validation.queue.length) {
-                // Continuar para próxima validação
                 const next = validation.queue[validation.currentIndex];
-                console.log(`[Validation] Next validation: ${next.playerNickname} - ${next.theme}`);
                 io.to(room).emit('answer_validated', { current: next });
             } else {
-                // Verificar se terminamos o tema atual
                 validation.currentThemeIndex++;
                 
                 if (validation.currentThemeIndex < config.themes.length) {
-                    // Aplicar pontuação para o tema atual
                     applyThemeScoring(room, validation.currentThemeIndex - 1, validation.answers, config.themes);
                     
-                    // Próximo tema
                     const nextTheme = config.themes[validation.currentThemeIndex];
-                    validation.queue = validation.answers.map(player => ({
-                        playerId: player.id,
-                        playerNickname: player.nickname,
-                        theme: nextTheme,
-                        answer: player.answers[validation.currentThemeIndex]?.answer || "",
-                        themeIndex: validation.currentThemeIndex,
-                        currentPlayerIndex: 0,
-                        totalPlayers: validation.answers.length,
-                        totalThemes: config.themes.length
-                    }));
+                    validation.queue = validation.answers.map((player, index) => {
+                        const themeAnswer = player.answers[validation.currentThemeIndex];
+                        const answerText = themeAnswer ? themeAnswer.answer : "";
+                        
+                        return {
+                            playerId: player.id,
+                            playerNickname: player.nickname,
+                            theme: nextTheme,
+                            answer: answerText,
+                            themeIndex: validation.currentThemeIndex,
+                            currentPlayerIndex: index,
+                            totalPlayers: validation.answers.length,
+                            totalThemes: config.themes.length
+                        };
+                    });
                     
                     validation.currentIndex = 0;
-                    
                     const firstOfNextTheme = validation.queue[0];
-                    console.log(`[Validation] Next theme: ${nextTheme}, starting with ${firstOfNextTheme.playerNickname}`);
                     io.to(room).emit('answer_validated', { current: firstOfNextTheme });
                     
                 } else {
-                    // Aplicar pontuação para o último tema
                     applyThemeScoring(room, validation.currentThemeIndex - 1, validation.answers, config.themes);
                     
-                    // Finalizar validação
-                    console.log(`[Validation] All themes completed! Finalizing validation for room ${room}`);
-                    
-                    // Calcular pontuações finais
                     validation.answers.forEach(player => {
                         const roundScore = player.answers.reduce((sum, a) => sum + (a.points || 0), 0);
                         
-                        // Atualizar score global do jogador
                         if (!roomState.playerScores) {
                             roomState.playerScores = new Map();
                         }
@@ -921,75 +787,76 @@ io.on('connection', (socket) => {
                         const newTotalScore = currentTotalScore + roundScore;
                         roomState.playerScores.set(player.id, newTotalScore);
                         
-                        console.log(`[Validation] Player ${player.nickname}: Round ${roundScore}, Total ${newTotalScore}`);
+                        const myAnswersWithDetails = player.answers.map(answer => ({
+                            theme: answer.theme,
+                            answer: answer.answer || "",
+                            points: answer.points || 0,
+                            reason: answer.reason || "Não validada",
+                            validated: true
+                        }));
                         
-                        // Buscar socket do jogador
-                        const playerSockets = Array.from(io.sockets.sockets.values()).filter(s => 
+                        const allSockets = Array.from(io.sockets.sockets.values());
+                        const playerSocket = allSockets.find(s => 
                             s.room === room && s.userId === player.id
                         );
                         
-                        if (playerSockets.length > 0) {
-                            playerSockets.forEach(targetSocket => {
-                                targetSocket.emit("validation_complete", { 
-                                    myScore: roundScore,
-                                    myTotalScore: newTotalScore,
-                                    myAnswers: player.answers
-                                });
-                                console.log(`[Validation] ✅ Sent results to ${player.nickname}: Round ${roundScore}, Total ${newTotalScore}`);
-                            });
-                        } else {
-                            console.warn(`[Validation] ⚠️ No socket found for player ${player.nickname}`);
-                            io.to(room).emit("validation_complete_for_player", {
-                                playerId: player.id,
+                        if (playerSocket) {
+                            playerSocket.emit("validation_complete", { 
                                 myScore: roundScore,
                                 myTotalScore: newTotalScore,
-                                myAnswers: player.answers
+                                myAnswers: myAnswersWithDetails,
+                                roundComplete: true
                             });
                         }
                     });
                     
-                    // Limpar validação
                     roomState.currentValidation = null;
-                    console.log(`[Validation] Validation completed for room ${room}`);
                 }
             }
             
         } catch (error) {
             console.error('[Validation] Error in validate_answer:', error);
-            console.error('[Validation] Stack trace:', error.stack);
         }
     });
 
     socket.on("new_round", async ({ room, resetLetters = false }) => {
         try {
-            console.log(`[Socket.io] Starting new round for room ${room}`);
+            console.log(`[Socket.io] New round requested for room ${room} by ${socket.userId}`);
             
             const config = roomConfigs[room];
             if (!config) {
                 console.error(`[Socket.io] Room config not found for ${room}`);
                 return;
             }
-
-            // OPCIONAL: Reset das letras se solicitado
-            if (resetLetters) {
-                clearRoomLetters(room);
-                console.log(`[Socket.io] Letter cycle reset for room ${room}`);
+            
+            // CORREÇÃO: Verificar se o usuário é admin
+            if (socket.userId !== config.creatorId) {
+                console.log(`[Socket.io] Unauthorized new_round attempt by ${socket.userId} in room ${room}`);
+                return;
             }
 
-            // Reset room state for new round
+            if (resetLetters) {
+                clearRoomLetters(room);
+            }
+
+            // CORREÇÃO: Reset completo dos estados
             config.roundActive = false;
             config.roundEnded = false;
             config.stopClickedByMe = false;
             config.currentLetter = null;
+            config.isCountingDown = false;
+            config.gameEnded = false; // CORREÇÃO: Reset gameEnded
             
-            // Clear game state for new round
             if (gameState.has(room)) {
                 const roomState = gameState.get(room);
                 roomState.answers.clear();
                 roomState.currentValidation = null;
+                // NÃO limpar playerScores para manter pontuação total
             }
 
             await saveRoomConfigToFirestore(room, config);
+
+            console.log(`[Socket.io] New round started for room ${room}`);
 
             io.to(room).emit("new_round_started", {
                 message: "Nova rodada iniciada!",
@@ -998,99 +865,74 @@ io.on('connection', (socket) => {
             
             emitRoomConfig(room, config);
             
-            console.log(`[Socket.io] New round initiated for room ${room}`);
-            
         } catch (error) {
             console.error('[Socket.io] Error starting new round:', error);
         }
     });
 
-    socket.on('end_game', ({ room }) => {
+    socket.on('end_game', async ({ room }) => {
         try {
+            console.log(`[Socket.io] Game end requested for room ${room} by ${socket.userId}`);
+            
+            const config = roomConfigs[room];
+            if (!config) {
+                console.log(`[Socket.io] No config found for room ${room}`);
+                return;
+            }
+            
+            // CORREÇÃO: Verificar se o usuário é admin
+            if (socket.userId !== config.creatorId) {
+                console.log(`[Socket.io] Unauthorized end_game attempt by ${socket.userId} in room ${room}`);
+                return;
+            }
+            
+            // CORREÇÃO: Verificar se o jogo já foi encerrado
+            if (config.gameEnded) {
+                console.log(`[Socket.io] Game already ended for room ${room}`);
+                return;
+            }
+            
+            // CORREÇÃO: Marcar jogo como encerrado
+            config.gameEnded = true;
+            config.roundActive = false;
+            config.roundEnded = false;
+            config.isCountingDown = false;
+            
+            await saveRoomConfigToFirestore(room, config);
+            
             console.log(`[Socket.io] Game ended for room ${room}`);
             
             const roomState = gameState.get(room);
-            if (!roomState) return;
-
-            // Criar ranking com scores totais
             const ranking = [];
             
-            if (roomState.playerScores && roomState.playerScores.size > 0) {
+            if (roomState && roomState.playerScores) {
                 for (const [playerId, totalScore] of roomState.playerScores.entries()) {
-                    const player = Object.values(players).find(p => p.userId === playerId);
-                    if (player) {
+                    const playerConfig = config.players[playerId];
+                    if (playerConfig) {
                         ranking.push({
                             playerId: playerId,
-                            nickname: player.nickname,
+                            nickname: playerConfig.nickname,
                             totalScore: totalScore
                         });
                     }
                 }
-            } else {
-                Object.values(players)
-                    .filter(p => p.room === room)
-                    .forEach(player => {
-                        ranking.push({
-                            playerId: player.userId,
-                            nickname: player.nickname,
-                            totalScore: 0
-                        });
-                    });
             }
 
             ranking.sort((a, b) => b.totalScore - a.totalScore);
             
-            console.log(`[Socket.io] Final ranking for room ${room}:`, ranking);
+            console.log(`[Socket.io] Final ranking for room ${room}:`, ranking.map(p => `${p.nickname}: ${p.totalScore}`));
             
             io.to(room).emit('game_ended', ranking);
             
-            // Limpar estado da sala
-            gameState.delete(room);
-            
-            // NOVO: Limpar letras usadas da sala
-            clearRoomLetters(room);
+            // CORREÇÃO: Limpar estados após um delay para permitir que o frontend processe
+            setTimeout(() => {
+                gameState.delete(room);
+                clearRoomLetters(room);
+                console.log(`[Socket.io] Room ${room} state cleared`);
+            }, 1000);
             
         } catch (error) {
             console.error('[Socket.io] Error in end_game:', error);
-        }
-    });
-
-    socket.on('leave_room', () => {
-        try {
-            const userId = socket.userId;
-            const room = socket.room;
-
-            if (userId && players[userId]) {
-                console.log(`[Socket.io] Player ${userId} leaving room ${room}`);
-                
-                delete players[userId];
-                socket.leave(room);
-
-                // Atualizar lista de jogadores na sala
-                if (roomConfigs[room]) {
-                    const playersInRoom = Object.values(players).filter(p => p.room === room);
-                    roomConfigs[room].players = playersInRoom.map(p => ({
-                        userId: p.userId,
-                        nickname: p.nickname,
-                        isCreator: p.isCreator
-                    }));
-
-                    // Se o admin saiu, promover outro jogador
-                    if (roomConfigs[room].creatorId === userId && playersInRoom.length > 0) {
-                        const newAdmin = playersInRoom[0];
-                        roomConfigs[room].creatorId = newAdmin.userId;
-                        newAdmin.isCreator = true;
-                        players[newAdmin.userId].isCreator = true;
-                        
-                        console.log(`[Socket.io] Novo admin designado para sala ${room}: ${newAdmin.nickname} (${newAdmin.userId})`);
-                    }
-
-                    io.to(room).emit('players_update', roomConfigs[room].players);
-                    saveRoomConfigToFirestore(room, roomConfigs[room]);
-                }
-            }
-        } catch (error) {
-            console.error('[Socket.io] Error leaving room:', error);
         }
     });
 
@@ -1099,61 +941,45 @@ io.on('connection', (socket) => {
             const userId = socket.userId;
             const room = socket.room;
 
-            if (userId && players[userId]) {
-                console.log(`[Socket.io] Socket desconectado. Socket ID: ${socket.id}, userId: ${userId}, Sala: ${room}`);
+            console.log(`[Socket.io] Socket desconectado. userId: ${userId}, Sala: ${room}`);
+
+            if (userId && room && roomConfigs[room]) {
+                const wasAdmin = roomConfigs[room].players[userId]?.isCreator;
                 
-                const player = players[userId];
+                delete roomConfigs[room].players[userId];
+
+                const remainingPlayers = Object.values(roomConfigs[room].players);
                 
-                // Se for admin, aguardar antes de transferir poder
-                if (player.isCreator && roomConfigs[room]) {
-                    console.log(`[Socket.io] Admin ${userId} desconectou. Iniciando timer de 30s...`);
+                if (remainingPlayers.length === 0) {
+                    console.log(`[Socket.io] Sala ${room} completamente vazia.`);
+                    delete roomConfigs[room];
+                    gameState.delete(room);
+                    clearRoomLetters(room);
+                } else if (wasAdmin) {
+                    const sortedPlayers = remainingPlayers.sort((a, b) => 
+                        new Date(a.joinedAt) - new Date(b.joinedAt)
+                    );
                     
-                    playerDisconnectionTimers[userId] = setTimeout(() => {
-                        console.log(`[Socket.io] Admin ${userId} não reconectou. Transferindo poder...`);
-                        
-                        const playersInRoom = Object.values(players).filter(p => p.room === room && p.userId !== userId);
-                        
-                        if (playersInRoom.length > 0) {
-                            const newAdmin = playersInRoom[0];
-                            roomConfigs[room].creatorId = newAdmin.userId;
-                            newAdmin.isCreator = true;
-                            players[newAdmin.userId].isCreator = true;
-                            
-                            console.log(`[Socket.io] Novo admin: ${newAdmin.nickname} (${newAdmin.userId}) na sala ${room}.`);
-                            
-                            roomConfigs[room].players = playersInRoom.map(p => ({
-                                userId: p.userId,
-                                nickname: p.nickname,
-                                isCreator: p.isCreator
-                            }));
-                            
-                            io.to(room).emit('players_update', roomConfigs[room].players);
-                            emitRoomConfig(room, roomConfigs[room]);
-                            saveRoomConfigToFirestore(room, roomConfigs[room]);
-                        }
-                        
-                        delete players[userId];
-                        delete playerDisconnectionTimers[userId];
-                    }, 30000); // 30 segundos
-                } else {
-                    // Jogador normal - remover imediatamente
-                    delete players[userId];
+                    const newAdmin = sortedPlayers[0];
+                    roomConfigs[room].creatorId = newAdmin.userId;
                     
-                    if (roomConfigs[room]) {
-                        const playersInRoom = Object.values(players).filter(p => p.room === room);
-                        roomConfigs[room].players = playersInRoom.map(p => ({
-                            userId: p.userId,
-                            nickname: p.nickname,
-                            isCreator: p.isCreator
-                        }));
-                        
-                        io.to(room).emit('players_update', roomConfigs[room].players);
-                        saveRoomConfigToFirestore(room, roomConfigs[room]);
-                    }
+                    Object.values(roomConfigs[room].players).forEach(p => p.isCreator = false);
+                    roomConfigs[room].players[newAdmin.userId].isCreator = true;
+                    
+                    console.log(`[Socket.io] Novo admin: ${newAdmin.nickname}`);
+
+                    const playersArray = Object.values(roomConfigs[room].players).sort((a, b) => {
+                        if (a.isCreator && !b.isCreator) return -1;
+                        if (!a.isCreator && b.isCreator) return 1;
+                        return new Date(a.joinedAt) - new Date(b.joinedAt);
+                    });
+
+                    io.to(room).emit('players_update', playersArray);
+                    emitRoomConfig(room, roomConfigs[room]);
+                    saveRoomConfigToFirestore(room, roomConfigs[room]);
                 }
             }
 
-            console.log(`[Socket.io] Conexão ${socket.id} desconectada`);
         } catch (error) {
             console.error('[Socket.io] Error on disconnect:', error);
         }
@@ -1169,36 +995,64 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            // Usar o admin como juiz quando o tempo esgotar
-            const adminPlayer = Object.values(players).find(p => p.room === room && p.isCreator);
+            const adminPlayer = Object.values(config.players).find(p => p.isCreator);
             if (!adminPlayer) {
                 console.log(`[Socket.io] No admin found in room ${room} for time up`);
                 return;
             }
 
-            // Update room state - mesmo comportamento do STOP
             config.roundActive = false;
             config.roundEnded = true;
-            config.stopClickedByMe = 'TIME_UP'; // Indicar que foi por tempo
+            config.stopClickedByMe = 'TIME_UP';
 
-            // Set admin como validator
             if (!gameState.has(room)) {
                 initializeRoomState(room);
             }
-            gameState.get(room).validatorId = adminPlayer.userId;
+            
+            const roomState = gameState.get(room);
+            roomState.validatorId = adminPlayer.userId;
 
             await saveRoomConfigToFirestore(room, config);
 
-            // Emitir que o tempo acabou
             io.to(room).emit("time_up_round_ended");
             emitRoomConfig(room, config);
 
-            // Start validation after delay
-            setTimeout(() => startValidation(room), 1500);
+            const answers = Array.from(roomState.answers.values());
+            if (answers.length > 0) {
+                setTimeout(() => startValidation(room), 1500);
+            } else {
+                io.to(room).emit("no_answers_to_validate");
+            }
             
-            console.log(`[Socket.io] Time up processed for room ${room}, admin ${adminPlayer.nickname} is judge`);
         } catch (error) {
             console.error('[Socket.io] Error in time_up:', error);
+        }
+    });
+
+    socket.on('get_room_config', async ({ room }) => {
+        try {
+            const config = roomConfigs[room];
+            if (config) {
+                socket.emit('room_config', {
+                    themes: config.themes || [],
+                    duration: config.duration || 180,
+                    roundActive: config.roundActive || false,
+                    roundEnded: config.roundEnded || false,
+                    currentLetter: config.currentLetter || null,
+                    isSaved: config.isSaved || false
+                });
+            } else {
+                socket.emit('room_config', {
+                    themes: [],
+                    duration: 180,
+                    roundActive: false,
+                    roundEnded: false,
+                    currentLetter: null,
+                    isSaved: false
+                });
+            }
+        } catch (error) {
+            console.error('[Backend] Error in get_room_config:', error);
         }
     });
 });
@@ -1207,91 +1061,3 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
-
-// Adicione estas variáveis globais no topo do arquivo, após as outras declarações:
-
-// Sistema de sorteio de letras sem repetição
-const roomLettersUsed = new Map(); // Armazena letras já usadas por sala
-
-// Todas as letras do alfabeto
-const ALL_LETTERS = [
-    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 
-    'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 
-    'U', 'V', 'W', 'X', 'Y', 'Z'
-];
-
-// Função para sortear letra sem repetição
-function getRandomLetterForRoom(room) {
-    // Inicializar array de letras usadas se não existir
-    if (!roomLettersUsed.has(room)) {
-        roomLettersUsed.set(room, []);
-    }
-    
-    const usedLetters = roomLettersUsed.get(room);
-    const availableLetters = ALL_LETTERS.filter(letter => !usedLetters.includes(letter));
-    
-    // Se todas as letras foram usadas, reiniciar o ciclo
-    if (availableLetters.length === 0) {
-        console.log(`[Letter System] Todas as letras foram usadas na sala ${room}. Reiniciando ciclo.`);
-        roomLettersUsed.set(room, []);
-        return getRandomLetterForRoom(room); // Recursão para sortear novamente
-    }
-    
-    // Sortear uma letra disponível
-    const randomIndex = Math.floor(Math.random() * availableLetters.length);
-    const selectedLetter = availableLetters[randomIndex];
-    
-    // Adicionar à lista de letras usadas
-    usedLetters.push(selectedLetter);
-    roomLettersUsed.set(room, usedLetters);
-    
-    console.log(`[Letter System] Sala ${room}: Letra sorteada '${selectedLetter}'. Letras usadas: [${usedLetters.join(', ')}]. Restantes: ${26 - usedLetters.length}`);
-    
-    return selectedLetter;
-}
-
-// Função para limpar letras usadas de uma sala (quando sala é deletada)
-function clearRoomLetters(room) {
-    if (roomLettersUsed.has(room)) {
-        roomLettersUsed.delete(room);
-        console.log(`[Letter System] Letras usadas da sala ${room} foram limpas.`);
-    }
-}
-
-// Encontre a função startRoundCountdown e substitua a linha do sorteio da letra:
-
-function startRoundCountdown(room) {
-    const config = roomConfigs[room];
-    if (!config) return;
-
-    console.log(`[Socket.io] Starting countdown for room ${room}`);
-    
-    let countdown = 5;
-    config.isCountingDown = true;
-    
-    const countdownInterval = setInterval(async () => {
-        io.to(room).emit("round_start_countdown", { countdown });
-        
-        countdown--;
-        
-        if (countdown < 0) {
-            clearInterval(countdownInterval);
-            config.isCountingDown = false;
-
-            // CORREÇÃO: Usar o novo sistema de sorteio sem repetição
-            const letter = getRandomLetterForRoom(room);
-            
-            config.currentLetter = letter;
-            config.roundActive = true;
-            config.roundEnded = false;
-            config.stopClickedByMe = false;
-            
-            await saveRoomConfigToFirestore(room, config);
-            
-            io.to(room).emit("round_started", { letter });
-            emitRoomConfig(room, config);
-            
-            console.log(`[Socket.io] Round started for room ${room} with letter ${letter}`);
-        }
-    }, 1000);
-}

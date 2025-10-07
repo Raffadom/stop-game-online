@@ -1,50 +1,87 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { socket } from '../socket';
 
-export default function Timer({ duration, room }) {
+export default function Timer({ duration, room, onTimeUp }) {
   const [timeLeft, setTimeLeft] = useState(duration);
-  const [timerEnded, setTimerEnded] = useState(false);
+  const [isActive, setIsActive] = useState(true);
 
   useEffect(() => {
     setTimeLeft(duration);
-    setTimerEnded(false);
+    setIsActive(true);
   }, [duration]);
 
   useEffect(() => {
-    if (timeLeft <= 0 || timerEnded) return;
+    let interval = null;
+    
+    if (isActive && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft((prevTime) => {
+          if (prevTime <= 1) {
+            // CORREÇÃO: Verificar se onTimeUp existe antes de chamar
+            if (typeof onTimeUp === 'function') {
+              onTimeUp();
+            } else {
+              // FALLBACK: Emitir time_up diretamente via socket
+              console.log('[Timer] onTimeUp não disponível, emitindo time_up via socket');
+              socket.emit('time_up', { room });
+            }
+            setIsActive(false);
+            return 0;
+          }
+          return prevTime - 1;
+        });
+      }, 1000);
+    } else {
+      clearInterval(interval);
+    }
 
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        const newTime = prev - 1;
-        
-        // Se chegou a 0, emitir time_up UMA VEZ
-        if (newTime <= 0 && !timerEnded) {
-          console.log('[Timer] Time up! Emitting time_up event for room:', room);
-          setTimerEnded(true);
-          socket.emit('time_up', { room });
-          clearInterval(timer);
-          return 0;
-        }
-        
-        return newTime;
-      });
-    }, 1000);
+    return () => clearInterval(interval);
+  }, [isActive, timeLeft, onTimeUp, room]);
 
-    return () => clearInterval(timer);
-  }, [timeLeft, room, timerEnded]);
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
-  const minutes = Math.floor(timeLeft / 60);
-  const seconds = timeLeft % 60;
+  const getProgressPercentage = () => {
+    return ((duration - timeLeft) / duration) * 100;
+  };
 
   const getColorClass = () => {
-    if (timeLeft <= 10) return 'text-red-600 animate-pulse';
-    if (timeLeft <= 30) return 'text-yellow-600';
-    return 'text-green-600';
+    const percentage = (timeLeft / duration) * 100;
+    if (percentage > 50) return 'text-green-600';
+    if (percentage > 25) return 'text-yellow-600';
+    return 'text-red-600';
   };
 
   return (
-    <div className={`text-4xl font-bold text-center ${getColorClass()}`}>
-      ⏰ {minutes}:{seconds.toString().padStart(2, '0')}
+    <div className="flex flex-col items-center space-y-4">
+      <div className={`text-6xl font-bold ${getColorClass()}`}>
+        {formatTime(timeLeft)}
+      </div>
+      
+      <div className="w-64 bg-gray-200 rounded-full h-4 dark:bg-gray-700">
+        <div 
+          className={`h-4 rounded-full transition-all duration-1000 ${
+            timeLeft <= 10 ? 'bg-red-500' : 
+            timeLeft <= 30 ? 'bg-yellow-500' : 'bg-green-500'
+          }`}
+          style={{ width: `${getProgressPercentage()}%` }}
+        />
+      </div>
+      
+      {timeLeft <= 10 && timeLeft > 0 && (
+        <div className="text-red-600 font-bold text-xl animate-pulse">
+          ⚠️ Tempo se esgotando!
+        </div>
+      )}
+      
+      {timeLeft === 0 && (
+        <div className="text-red-600 font-bold text-2xl animate-bounce">
+          ⏰ Tempo esgotado!
+        </div>
+      )}
     </div>
   );
 }

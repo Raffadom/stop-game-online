@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import GameBoard from "./GameBoard";
 import Timer from "./Timer";
 import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
-import { socket } from '../socket'; // Importar socket
+import { socket } from '../socket';
 
 // Alertas customizados para melhor UX
 const Alert = ({ message, type, isVisible, onClose }) => {
@@ -84,22 +84,6 @@ export default function Room({
     }
   }, [alertState, setAlertState]);
 
-  // useEffect para debug de eventos socket - CORRIGIDO
-  useEffect(() => {
-    const handleRoomJoined = (data) => {
-      console.log('[Room] room_joined recebido:', data);
-      console.log('[Room] Player data:', data.player);
-      console.log('[Room] isCreator:', data.player?.isCreator);
-    };
-
-    socket.on('room_joined', handleRoomJoined);
-
-    // Cleanup
-    return () => {
-      socket.off('room_joined', handleRoomJoined);
-    };
-  }, []);
-
   const toggleTheme = () => {
     setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
   };
@@ -135,9 +119,19 @@ export default function Room({
   const saveButtonText = isRoomSaved ? '✅ Sala Salva' : '💾 Salvar Sala';
   const saveButtonColor = isRoomSaved ? 'bg-green-500 hover:bg-green-600' : 'bg-yellow-500 hover:bg-yellow-600';
 
-  // As condições de renderização voltaram ao normal, sem as mensagens de debug
   const isSaveButtonVisible = isAdmin && !roundStarted && !roundEnded;
-  const isStartRoundControlsVisible = isAdmin && !roundStarted && !roundEnded && countdown === null;
+  const isStartRoundControlsVisible = isAdmin && 
+                                    !roundStarted && 
+                                    !roundEnded && 
+                                    roomThemes && 
+                                    roomThemes.length > 0 && 
+                                    (countdown === null || countdown === undefined);
+
+  // CORREÇÃO: Adicionar função para lidar com tempo esgotado
+  const handleTimeUp = () => {
+    console.log('[Room] ⏰ Tempo esgotado! Emitindo time_up para o backend');
+    socket.emit('time_up', { room });
+  };
 
   return (
     <div className="flex flex-col min-h-screen max-w-5xl mx-auto px-4 py-6 space-y-8 relative">
@@ -183,7 +177,7 @@ export default function Room({
               Link da sala copiado!
             </span>
           )}
-          {isSaveButtonVisible && ( // Condição para botão Salvar Sala
+          {isSaveButtonVisible && (
             <button
               onClick={handleSaveRoomWithDetails}
               className={`px-3 py-1 text-white rounded-md text-sm transition-colors shadow font-semibold ${saveButtonColor}`}
@@ -230,7 +224,7 @@ export default function Room({
 
       {/* Controles da Rodada */}
       <div className="bg-white p-6 rounded-xl shadow w-full flex flex-col items-center space-y-4 dark:bg-gray-800 dark:text-gray-100">
-        {isStartRoundControlsVisible && ( // Condição para controles de admin (Duração e Iniciar)
+        {isStartRoundControlsVisible && (
           <div className="flex flex-col sm:flex-row items-center gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="duration-input" className="text-gray-700 font-medium dark:text-gray-300">Duração (segundos):</label>
@@ -247,23 +241,26 @@ export default function Room({
             <button
               onClick={handleStartRound}
               className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg shadow-md transition-colors duration-200 font-semibold"
-              disabled={roomThemes.length === 0}
+              disabled={!roomThemes || roomThemes.length === 0}
             >
-              Iniciar Rodada
+              🚀 Iniciar Rodada
             </button>
           </div>
         )}
 
-        {/* Estes controles não são de admin, então mantêm a lógica original */}
-        {roundStarted && countdown === null && (
+        {roundStarted && (countdown === null || countdown === undefined) && (
           <>
-            <Timer duration={roomDuration} room={room} />
+            <Timer 
+              duration={roomDuration} 
+              room={room} 
+              onTimeUp={handleTimeUp} // CORREÇÃO: Passar a função onTimeUp
+            />
             {!stopClickedByMe && (
               <button
                 onClick={handleStopRound}
                 className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg shadow-md mt-4 transition-colors duration-200 font-semibold"
               >
-                STOP
+                🛑 STOP
               </button>
             )}
             {stopClickedByMe && (
@@ -304,7 +301,7 @@ export default function Room({
           onClick={handleLeaveRoom}
           className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg shadow transition-colors duration-200"
         >
-          Sair da Sala
+          🚪 Sair da Sala
         </button>
       </div>
     </div>

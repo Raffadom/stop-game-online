@@ -39,14 +39,14 @@ export default function Home({ onJoinOrCreateRoom, roomError, isConnected }) {
 
   return (
     // Container principal: Fundo da página
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 p-4"> {/* Adicionado dark:bg-gray-900 e p-4 para padding em telas pequenas */}
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 p-4" data-testid="home-container">
       {/* Caixa do formulário */}
-      <div className="max-w-md mx-auto bg-white p-8 rounded-2xl shadow-xl space-y-6 border border-gray-200 dark:bg-gray-800 dark:border-gray-700"> {/* Adicionado dark:bg-gray-800 e dark:border-gray-700 */}
-        <h1 className="text-3xl font-extrabold text-center text-blue-700 dark:text-blue-400"> {/* Adicionado dark:text-blue-400 */}
+      <div className="max-w-md mx-auto bg-white p-8 rounded-2xl shadow-xl space-y-6 border border-gray-200 dark:bg-gray-800 dark:border-gray-700" data-testid="home-form-container">
+        <h1 className="text-3xl font-extrabold text-center text-blue-700 dark:text-blue-400" data-testid="game-title">
           Stop (Adedonha)
         </h1>
 
-        <div className="space-y-4">
+        <div className="space-y-4" data-testid="form-inputs">
           <input
             type="text"
             placeholder="Seu Nickname"
@@ -54,6 +54,7 @@ export default function Home({ onJoinOrCreateRoom, roomError, isConnected }) {
             onChange={(e) => setNickname(e.target.value)}
             className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" 
             maxLength={15}
+            data-testid="nickname-input"
           />
 
           <input
@@ -63,10 +64,13 @@ export default function Home({ onJoinOrCreateRoom, roomError, isConnected }) {
             onChange={(e) => setJoinCode(e.target.value)}
             className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 text-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100" 
             maxLength={8}
+            data-testid="room-code-input"
           />
 
           {(localError || roomError) && (
-            <p className="text-red-500 text-sm text-center dark:text-red-400">{localError || roomError}</p>
+            <p className="text-red-500 text-sm text-center dark:text-red-400" data-testid="error-message">
+              {localError || roomError}
+            </p>
           )}
         </div>
 
@@ -74,14 +78,15 @@ export default function Home({ onJoinOrCreateRoom, roomError, isConnected }) {
           onClick={handleJoin}
           className="w-full bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-lg font-semibold text-xl shadow-md transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={!isConnected || !nickname || nickname.trim() === ''}
+          data-testid="join-create-room-btn"
         >
           {isConnected ? 'Entrar ou Criar Sala' : 'Conectando...'}
         </button>
 
-        <p className="text-center text-gray-500 text-sm mt-4 dark:text-gray-400"> {/* Adicionado dark:text-gray-400 */}
+        <p className="text-center text-gray-500 text-sm mt-4 dark:text-gray-400" data-testid="help-text">
           Deixe o campo "Código da Sala" vazio para criar uma nova sala.
         </p>
       </div>
     </div>
   );
-};
+}

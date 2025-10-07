@@ -1017,12 +1017,34 @@ io.on('connection', (socket) => {
             io.to(room).emit("time_up_round_ended");
             emitRoomConfig(room, config);
 
-            const answers = Array.from(roomState.answers.values());
-            if (answers.length > 0) {
-                setTimeout(() => startValidation(room), 1500);
-            } else {
-                io.to(room).emit("no_answers_to_validate");
-            }
+            // CORREÇÃO: Aguardar mais tempo para que todos os clientes enviem suas respostas
+            console.log(`[Socket.io] ⏰ Aguardando 4 segundos para receber todas as respostas na sala ${room}`);
+            
+            setTimeout(() => {
+                console.log(`[Socket.io] ⏰ Verificando respostas após timeout na sala ${room}`);
+                const currentRoomState = gameState.get(room);
+                
+                if (!currentRoomState) {
+                    console.log(`[Socket.io] Room state not found for ${room}`);
+                    return;
+                }
+                
+                const answers = Array.from(currentRoomState.answers.values());
+                console.log(`[Socket.io] ⏰ Respostas encontradas após tempo esgotado: ${answers.length}`);
+                
+                // Log das respostas para debug
+                answers.forEach((playerData, index) => {
+                    console.log(`[Socket.io] ⏰ Player ${index + 1}: ${playerData.nickname} - ${playerData.answers.length} respostas`);
+                });
+                
+                if (answers.length > 0) {
+                    console.log(`[Socket.io] ⏰ Iniciando validação com ${answers.length} jogadores`);
+                    startValidation(room);
+                } else {
+                    console.log(`[Socket.io] ⏰ Nenhuma resposta encontrada - emitindo no_answers_to_validate`);
+                    io.to(room).emit("no_answers_to_validate");
+                }
+            }, 4000); // CORREÇÃO: 4 segundos em vez de 1.5
             
         } catch (error) {
             console.error('[Socket.io] Error in time_up:', error);

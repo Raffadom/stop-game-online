@@ -63,10 +63,16 @@ function App() {
   };
 
   const handleTimeUpRoundEnded = () => {
-    console.log('[App] Time up - round ended');
-    setRoundStarted(false);
+    console.log('[App] ⏰ Tempo esgotado - finalizando rodada');
     setRoundEnded(true);
-    setStopClickedByMe(false);
+    setRoundStarted(false); // CORREÇÃO: Marcar como não iniciada
+    
+    // CORREÇÃO: Reset do timer se ainda estiver ativo
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setTimeLeft(0);
   };
 
   const handleNewRoundStarted = () => {
@@ -151,32 +157,32 @@ function App() {
     socket.on('disconnect', handleDisconnect);
     socket.on('room_joined', handleRoomJoined);
     socket.on('players_update', handlePlayersUpdate);
-    socket.on('room_config', handleRoomConfig);
     socket.on('round_start_countdown', handleRoundStartCountdown);
     socket.on('round_started', handleRoundStarted);
     socket.on('round_ended', handleRoundEnded);
-    socket.on('time_up_round_ended', handleTimeUpRoundEnded);
+    socket.on('time_up_round_ended', handleTimeUpRoundEnded); // CORREÇÃO: Usar handler específico
     socket.on('new_round_started', handleNewRoundStarted);
-    socket.on('room_saved_success', handleRoomSavedSuccess);
-
-    if (socket.connected) {
-      setIsConnected(true);
-    }
+    socket.on('room_config', handleRoomConfig);
+    socket.on('error', handleError);
 
     return () => {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
       socket.off('room_joined', handleRoomJoined);
-      socket.off('players_update', handlePlayersUpdate); 
-      socket.off('room_config', handleRoomConfig);
+      socket.off('players_update', handlePlayersUpdate);
       socket.off('round_start_countdown', handleRoundStartCountdown);
       socket.off('round_started', handleRoundStarted);
       socket.off('round_ended', handleRoundEnded);
       socket.off('time_up_round_ended', handleTimeUpRoundEnded);
       socket.off('new_round_started', handleNewRoundStarted);
-      socket.off('room_saved_success', handleRoomSavedSuccess);
+      socket.off('room_config', handleRoomConfig);
+      socket.off('error', handleError);
+      
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
     };
-  }, []);
+  }, [currentUser]);
 
   const handleJoinOrCreateRoom = (roomName, nickname) => {
     console.log(`Tentando entrar/criar sala: ${roomName} com nickname: ${nickname}`);

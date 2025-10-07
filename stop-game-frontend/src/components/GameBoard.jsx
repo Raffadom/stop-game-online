@@ -162,11 +162,20 @@ export default function GameBoard({
 
     const handleTimeUpRoundEnded = () => {
       console.log('[GameBoard] ⏰ Tempo esgotado - rodada finalizada');
+      
+      // CORREÇÃO: Enviar respostas imediatamente quando tempo esgotar
+      if (answers.length > 0 && !answersSubmitted) {
+        console.log('[GameBoard] ⏰ Enviando respostas devido ao tempo esgotado');
+        submitAnswers();
+        setAnswersSubmitted(true);
+      }
+      
       setRoundScore(0);
       setShowRoundResult(false);
       setIsRevealing(false);
       setCanReveal(false);
       setRevealed(false);
+      setIsRoundActive(false); // CORREÇÃO: Marcar rodada como inativa
     };
 
     const handleNewRoundStarted = () => {

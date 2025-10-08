@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { socket } from './socket';
 import Home from './components/Home';
 import Room from './components/Room';
@@ -31,6 +31,10 @@ function App() {
     type: ''
   });
 
+  // CORREÇÃO: Adicionar refs que estavam faltando
+  const timerRef = useRef(null);
+  const [timeLeft, setTimeLeft] = useState(0);
+
   useEffect(() => {
     let storedUserId = localStorage.getItem('userId');
     if (!storedUserId) {
@@ -39,6 +43,17 @@ function App() {
     }
     setUserId(storedUserId);
   }, []);
+
+  // CORREÇÃO: Adicionar handleError que estava faltando
+  const handleError = (error) => {
+    console.error('[App] Socket error:', error);
+    setRoomError(error.message || 'Erro de conexão');
+    setAlertState({
+      isVisible: true,
+      message: error.message || 'Erro de conexão',
+      type: 'error'
+    });
+  };
 
   // CORREÇÃO: Definir handlers que estavam sendo referenciados
   const handleRoundStartCountdown = (data) => {
@@ -65,7 +80,7 @@ function App() {
   const handleTimeUpRoundEnded = () => {
     console.log('[App] ⏰ Tempo esgotado - finalizando rodada');
     setRoundEnded(true);
-    setRoundStarted(false); // CORREÇÃO: Marcar como não iniciada
+    setRoundStarted(false);
     
     // CORREÇÃO: Reset do timer se ainda estiver ativo
     if (timerRef.current) {
@@ -95,6 +110,9 @@ function App() {
   };
 
   useEffect(() => {
+    // CORREÇÃO: Não usar userId como dependência se ainda não foi definido
+    if (!userId) return;
+
     const handleConnect = () => {
       console.log('Conectado ao servidor');
       setIsConnected(true);
@@ -114,8 +132,8 @@ function App() {
       console.log('[App] Room joined:', data);
       
       if (data.room && data.player && data.players) {
-        setRoomName(data.room); // CORREÇÃO: usar setRoomName em vez de setCurrentRoom
-        setCurrentPage('room'); // CORREÇÃO: usar setCurrentPage em vez de setCurrentView
+        setRoomName(data.room);
+        setCurrentPage('room');
         setNickname(data.player.nickname);
         setIsAdmin(data.player.isCreator);
         setPlayersInRoom(data.players);
@@ -160,9 +178,10 @@ function App() {
     socket.on('round_start_countdown', handleRoundStartCountdown);
     socket.on('round_started', handleRoundStarted);
     socket.on('round_ended', handleRoundEnded);
-    socket.on('time_up_round_ended', handleTimeUpRoundEnded); // CORREÇÃO: Usar handler específico
+    socket.on('time_up_round_ended', handleTimeUpRoundEnded);
     socket.on('new_round_started', handleNewRoundStarted);
     socket.on('room_config', handleRoomConfig);
+    socket.on('room_saved_success', handleRoomSavedSuccess); // CORREÇÃO: Adicionar listener
     socket.on('error', handleError);
 
     return () => {
@@ -176,13 +195,14 @@ function App() {
       socket.off('time_up_round_ended', handleTimeUpRoundEnded);
       socket.off('new_round_started', handleNewRoundStarted);
       socket.off('room_config', handleRoomConfig);
+      socket.off('room_saved_success', handleRoomSavedSuccess);
       socket.off('error', handleError);
       
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
     };
-  }, [currentUser]);
+  }, [userId]); // CORREÇÃO: Usar userId como dependência em vez de currentUser
 
   const handleJoinOrCreateRoom = (roomName, nickname) => {
     console.log(`Tentando entrar/criar sala: ${roomName} com nickname: ${nickname}`);

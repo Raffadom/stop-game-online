@@ -52,3 +52,62 @@ Cypress.Commands.add('shouldBeInViewport', { prevSubject: true }, (subject) => {
     expect(rect.right).to.be.at.most(viewport.width);
   });
 });
+
+// Comandos customizados baseados na sua estrutura
+
+Cypress.Commands.add('loginToGame', (nickname, roomCode = '') => {
+  cy.get('[data-testid="nickname-input"]')
+    .clear()
+    .type(nickname);
+    
+  if (roomCode) {
+    cy.get('[data-testid="room-code-input"]')
+      .clear()
+      .type(roomCode);
+  }
+  
+  cy.get('[data-testid="join-create-room-btn"]').click();
+  cy.get('[data-testid="game-board"]', { timeout: 10000 }).should('be.visible');
+});
+
+Cypress.Commands.add('startGameRound', () => {
+  cy.get('[data-testid="start-round-btn"]').click();
+  cy.get('[data-testid="game-letter"]', { timeout: 10000 }).should('be.visible');
+});
+
+Cypress.Commands.add('fillAnswers', (answers) => {
+  answers.forEach((answer, index) => {
+    if (answer) {
+      cy.get('[data-testid="answer-input"]').eq(index)
+        .clear()
+        .type(answer);
+    }
+  });
+});
+
+Cypress.Commands.add('stopRound', () => {
+  cy.get('[data-testid="stop-round-btn"]').click();
+  cy.get('[data-testid="validation-modal"]', { timeout: 5000 }).should('be.visible');
+});
+
+Cypress.Commands.add('validateAnswers', (validations) => {
+  validations.forEach((isValid) => {
+    cy.get('body').then(($body) => {
+      if ($body.find('[data-testid="validation-modal"]').length > 0) {
+        if (isValid) {
+          cy.get('[data-testid="validate-valid-btn"]').click();
+        } else {
+          cy.get('[data-testid="validate-invalid-btn"]').click();
+        }
+        cy.wait(500);
+      }
+    });
+  });
+});
+
+Cypress.Commands.add('checkPerformance', (maxLoadTime = 3000) => {
+  cy.window().then((win) => {
+    const loadTime = win.performance.timing.loadEventEnd - win.performance.timing.navigationStart;
+    expect(loadTime).to.be.lessThan(maxLoadTime);
+  });
+});

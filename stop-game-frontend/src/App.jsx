@@ -225,7 +225,15 @@ function App() {
     }
   }, []);
 
-  // ✅ Socket listeners
+  // ✅ ADICIONAR: Handler para fim de jogo
+  const handleGameEnded = useCallback((data) => {
+    console.log('[App] 🏁 Jogo finalizado:', data);
+    
+    // ✅ Não fazer nada aqui - deixar o GameBoard processar
+    // O GameBoard já tem lógica para mostrar finalRanking
+  }, []);
+
+  // ✅ Socket listeners (adicionar na lista)
   useEffect(() => {
     if (!userId) return;
 
@@ -253,6 +261,7 @@ function App() {
     socket.on('new_round_started', handleNewRoundStarted);
     socket.on('room_config', handleRoomConfig);
     socket.on('room_saved_success', handleRoomSavedSuccess);
+    socket.on('game_ended', handleGameEnded); // ✅ ADICIONAR
     socket.on('error', handleError);
 
     return () => {
@@ -269,6 +278,7 @@ function App() {
       socket.off('new_round_started', handleNewRoundStarted);
       socket.off('room_config', handleRoomConfig);
       socket.off('room_saved_success', handleRoomSavedSuccess);
+      socket.off('game_ended', handleGameEnded); // ✅ ADICIONAR
       socket.off('error', handleError);
       
       if (timerRef.current) {
@@ -288,6 +298,7 @@ function App() {
     handleNewRoundStarted,
     handleRoomConfig,
     handleRoomSavedSuccess,
+    handleGameEnded, // ✅ ADICIONAR
     handleError
   ]);
 

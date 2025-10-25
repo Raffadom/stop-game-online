@@ -240,9 +240,10 @@ function GameBoard({
           if (validatedAnswer) {
             return {
               ...answer,
+              answer: validatedAnswer.answer || answer.answer, // ✅ Preservar resposta original
               points: validatedAnswer.points,
               reason: validatedAnswer.reason,
-              validated: true
+              validated: true // ✅ IMPORTANTE: Marcar como validada
             };
           }
           return answer;
@@ -717,7 +718,8 @@ function GameBoard({
                     value={a.answer || ""} 
                     onChange={(e) => handleAnswerChange(i, e.target.value)}
                   />
-                  {a.points !== null && (
+                  {/* ✅ MELHORAR: Sempre mostrar pontuação quando disponível */}
+                  {a.points !== null && a.validated && (
                     <div className="mt-2 space-y-1">
                       <div className={`text-right font-bold ${
                         a.points === 100 ? 'text-green-600' :        
@@ -733,12 +735,18 @@ function GameBoard({
                         {a.points === 0 && '🔴 Resposta incorreta/vazia'}
                       </div>
                       
-                      {/* ✅ Mostrar motivo se houver */}
                       {a.reason && (
                         <div className="text-xs text-gray-500 dark:text-gray-400 italic">
                           "{a.reason}"
                         </div>
                       )}
+                    </div>
+                  )}
+                  
+                  {/* ✅ ADICIONAR: Mostrar status de validação */}
+                  {roundEnded && !a.validated && (
+                    <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      ⏳ Aguardando validação...
                     </div>
                   )}
                 </div>
@@ -955,35 +963,8 @@ function GameBoard({
         </>
       )}
 
-      {finalRanking && <FinalRanking />}
     </div>
   );
 };
 
 export default GameBoard;
-
-// EXEMPLO da lógica correta que deveria estar no backend
-const calculatePoints = (allAnswers, theme) => {
-  const answersForTheme = allAnswers
-    .map(playerAnswers => playerAnswers.find(a => a.theme === theme))
-    .filter(answer => answer && answer.answer.trim() && answer.valid);
-
-  // Contar quantas vezes cada resposta aparece
-  const answerCounts = {};
-  answersForTheme.forEach(answer => {
-    const normalizedAnswer = answer.answer.toLowerCase().trim();
-    answerCounts[normalizedAnswer] = (answerCounts[normalizedAnswer] || 0) + 1;
-  });
-
-  // Aplicar pontuação
-  answersForTheme.forEach(answer => {
-    const normalizedAnswer = answer.answer.toLowerCase().trim();
-    const count = answerCounts[normalizedAnswer];
-    
-    if (count === 1) {
-      answer.points = 100; // Resposta única
-    } else {
-      answer.points = 50;  // Resposta repetida
-    }
-  });
-};

@@ -962,60 +962,59 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('end_game', async ({ room }) => {
-        try {
-            console.log(`[Socket.io] Game end requested for room ${room} by ${socket.userId}`);
-            
-            const config = roomConfigs[room];
-            if (!config) {
-                console.log(`[Socket.io] No config found for room ${room}`);
-                return;
-            }
-            
-            if (socket.userId !== config.creatorId) {
-                console.log(`[Socket.io] Unauthorized end_game attempt by ${socket.userId} in room ${room}`);
-                return;
-            }
-            
-            if (config.gameEnded) {
-                console.log(`[Socket.io] Game already ended for room ${room}`);
-                return;
-            }
-            
-            config.gameEnded = true;
-            config.roundActive = false;
-            config.roundEnded = false;
-            config.isCountingDown = false;
-            
-            // ✅ NÃO salvar automaticamente no Firestore
-            // await saveRoomConfigToFirestore(room, config); // ❌ REMOVIDO
-            
-            console.log(`[Socket.io] Game ended for room ${room}`);
-            
-            const roomState = gameState.get(room);
-            const ranking = [];
-            
-            if (roomState && roomState.playerScores) {
-                for (const [playerId, totalScore] of roomState.playerScores.entries()) {
-                    const playerConfig = config.players[playerId];
-                    if (playerConfig) {
-                        ranking.push({
-                            userId: playerId,
-                            nickname: playerConfig.nickname,
-                            score: totalScore
-                        });
-                    }
-                }
-            }
-            
-            ranking.sort((a, b) => b.score - a.score);
-            
-            io.to(room).emit('game_ended', { ranking });
-            
-        } catch (error) {
-            console.error('[Socket.io] Error ending game:', error);
+    // ✅ CORRIGIR: Função para encerrar jogo
+    socket.on("end_game", ({ room }) => {
+  try {
+    console.log(`Game end requested for room ${room} by ${socket.userId}`);
+    
+    const config = roomConfigs[room]; // ✅ CORRIGIR: usar roomConfigs
+    if (!config) {
+      console.log(`No config found for room ${room}`);
+      return;
+    }
+
+    // ✅ Verificar se jogo já foi encerrado
+    if (config.gameEnded) {
+      console.log(`Game already ended for room ${room}`);
+      return;
+    }
+
+    // ✅ Marcar jogo como encerrado
+    config.gameEnded = true;
+    console.log(`Game ended for room ${room}`);
+
+    // ✅ Calcular ranking final baseado nos totalScore dos sockets
+    const finalRanking = [];
+    const roomSockets = io.sockets.adapter.rooms.get(room);
+    
+    if (roomSockets) {
+      for (const socketId of roomSockets) {
+        const playerSocket = io.sockets.sockets.get(socketId);
+        if (playerSocket && playerSocket.userId && playerSocket.nickname) {
+          finalRanking.push({
+            playerId: playerSocket.userId,
+            nickname: playerSocket.nickname,
+            totalScore: playerSocket.totalScore || 0
+          });
         }
+      }
+    }
+
+    // ✅ Ordenar por pontuação (maior para menor)
+    finalRanking.sort((a, b) => b.totalScore - a.totalScore);
+
+    console.log(`[Socket.io] 🏆 Ranking final para sala ${room}:`, finalRanking);
+
+    // ✅ Emitir ranking final para todos da sala
+    io.to(room).emit("game_ended", {
+      finalRanking: finalRanking,
+      room: room
     });
+
+  } catch (error) {
+    console.error('[Socket.io] Error ending game:', error);
+  }
+});
 
     socket.on('disconnect', () => {
         try {

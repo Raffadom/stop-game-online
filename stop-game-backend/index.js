@@ -230,7 +230,6 @@ function startRoundCountdown(room) {
         return;
     }
 
-    // CORREÇÃO: Verificar se já está em countdown para evitar múltiplas execuções
     if (config.isCountingDown) {
         console.log(`[Countdown] Countdown already in progress for room ${room}`);
         return;
@@ -258,11 +257,12 @@ function startRoundCountdown(room) {
             config.roundEnded = false;
             config.stopClickedByMe = false;
             
-            await saveRoomConfigToFirestore(room, config);
+            // ✅ NÃO salvar automaticamente no Firestore
+            // await saveRoomConfigToFirestore(room, config); // ❌ REMOVIDO
             
             console.log(`[Countdown] Round started for room ${room} with letter ${letter}`);
             io.to(room).emit("round_started", { letter });
-            emitRoomConfig(room, config); // CORREÇÃO: Mudado de roomId para room
+            emitRoomConfig(room, config);
         }
     }, 1000);
 }
@@ -422,41 +422,69 @@ io.on('connection', (socket) => {
             const socketsInRoom = await io.in(roomId).fetchSockets();
             const connectedUserIds = socketsInRoom.map(s => s.userId).filter(Boolean);
 
-            let roomConfig = await getRoomConfigFromFirestore(roomId);
+            let roomConfig = roomConfigs[roomId]; // ✅ Primeiro verificar memória local
             
             if (!roomConfig) {
-                console.log(`[Backend Log - join_room] Criando nova sala ${roomId}`);
-                roomConfig = {
-                    themes: ['País', 'Cidade', 'Nome', 'Animal', 'Cor', 'Marca', 'CEP', 'Objeto', 'Fruta'],
-                    duration: 180,
-                    creatorId: null,
-                    roundActive: false,
-                    roundEnded: false,
-                    currentLetter: null,
-                    isSaved: false,
-                    isCountingDown: false, // CORREÇÃO: Adicionar controle de countdown
-                    createdAt: new Date(),
-                    players: {}
-                };
-            } else {
-                console.log(`[Backend Log - join_room] Sala ${roomId} encontrada no Firestore.`);
+                // ✅ Se não está na memória, verificar Firestore APENAS se for sala salva
+                console.log(`[Backend Log - join_room] Sala ${roomId} não encontrada na memória, verificando Firestore...`);
+                const savedRoomConfig = await getRoomConfigFromFirestore(roomId);
                 
-                // CORREÇÃO: Sempre resetar estados de rodada para novos jogadores
+                if (savedRoomConfig && savedRoomConfig.isSaved) {
+                    console.log(`[Backend Log - join_room] Sala salva ${roomId} encontrada no Firestore`);
+                    roomConfig = savedRoomConfig;
+                    
+                    // ✅ Manter configuração salva (incluindo temas personalizados)
+                    console.log(`[Backend Log - join_room] ✅ Mantendo temas salvos: [${roomConfig.themes.join(', ')}]`);
+                    console.log(`[Backend Log - join_room] ✅ Duração salva: ${roomConfig.duration}s`);
+                    console.log(`[Backend Log - join_room] ✅ Status da sala: ${roomConfig.isSaved ? 'SALVA' : 'TEMPORÁRIA'}`);
+                    
+                    // ✅ Resetar apenas estados de jogo (manter configurações)
+                    roomConfig.roundActive = false;
+                    roomConfig.roundEnded = false;
+                    roomConfig.currentLetter = null;
+                    roomConfig.isCountingDown = false;
+                    roomConfig.gameEnded = false;
+                    
+                    // ✅ Limpar jogadores desconectados
+                    const currentPlayers = roomConfig.players || {};
+                    const validPlayers = {};
+                    
+                    Object.values(currentPlayers).forEach(player => {
+                        if (connectedUserIds.includes(player.userId) || player.userId === userId) {
+                            validPlayers[player.userId] = player;
+                        }
+                    });
+                    
+                    roomConfig.players = validPlayers;
+                } else {
+                    // ✅ Criar nova sala temporária com temas padrão
+                    console.log(`[Backend Log - join_room] Criando nova sala temporária ${roomId}`);
+                    roomConfig = {
+                        themes: ['Nome', 'Cidade', 'País', 'Marca', 'Cor', 'Animal'],
+                        duration: 60,
+                        creatorId: null,
+                        roundActive: false,
+                        roundEnded: false,
+                        currentLetter: null,
+                        isSaved: false, // ✅ Sala temporária
+                        isCountingDown: false,
+                        createdAt: new Date(),
+                        players: {}
+                    };
+                    
+                    console.log(`[Backend Log - join_room] ✅ Nova sala criada com temas: [${roomConfig.themes.join(', ')}]`);
+                }
+            } else {
+                console.log(`[Backend Log - join_room] Sala ${roomId} encontrada na memória local`);
+                
+                // ✅ CORREÇÃO: Não forçar temas padrão - manter temas atuais da sala
+                console.log(`[Backend Log - join_room] ✅ Mantendo temas atuais: [${roomConfig.themes.join(', ')}]`);
+                
+                // ✅ Resetar apenas estados de jogo
                 roomConfig.roundActive = false;
                 roomConfig.roundEnded = false;
                 roomConfig.currentLetter = null;
                 roomConfig.isCountingDown = false;
-                
-                const currentPlayers = roomConfig.players || {};
-                const validPlayers = {};
-                
-                Object.values(currentPlayers).forEach(player => {
-                    if (connectedUserIds.includes(player.userId) || player.userId === userId) {
-                        validPlayers[player.userId] = player;
-                    }
-                });
-                
-                roomConfig.players = validPlayers;
             }
 
             let isCreator = false;
@@ -482,8 +510,8 @@ io.on('connection', (socket) => {
                 joinedAt: new Date()
             };
 
+            // ✅ Salvar APENAS na memória local (não no Firestore)
             roomConfigs[roomId] = roomConfig;
-            await saveRoomConfigToFirestore(roomId, roomConfig);
 
             const playersArray = Object.values(roomConfig.players).sort((a, b) => {
                 if (a.isCreator && !b.isCreator) return -1;
@@ -491,7 +519,8 @@ io.on('connection', (socket) => {
                 return new Date(a.joinedAt) - new Date(b.joinedAt);
             });
 
-            console.log(`[Backend Log - join_room] ✅ ${nickname} entrou na sala ${roomId}. É ADMIN: ${isCreator ? 'SIM' : 'NÃO'}. Total: ${playersArray.length}`);
+            console.log(`[Backend Log - join_room] ✅ ${nickname} entrou na sala ${roomId}. É ADMIN: ${isCreator ? 'SIM' : 'NÃO'}. Total: ${playersArray.length}. Sala salva: ${roomConfig.isSaved ? 'SIM' : 'NÃO'}`);
+            console.log(`[Backend Log - join_room] ✅ Temas finais da sala: [${roomConfig.themes.join(', ')}] - Duração: ${roomConfig.duration}s`);
 
             socket.emit('room_joined', {
                 room: roomId,
@@ -520,15 +549,30 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            config.themes = themes;
-            config.isSaved = false;
-
-            await saveRoomConfigToFirestore(room, config);
-            
-            io.to(room).emit('themes_updated', { themes });
-            emitRoomConfig(room, config);
-            
-            console.log(`[Socket.io] Themes updated for room ${room}:`, themes);
+            // ✅ CORREÇÃO: Permitir alterações em salas salvas, mas marcar como não salva
+            if (themes && Array.isArray(themes) && themes.length > 0) {
+                const validThemes = themes.filter(theme => 
+                    typeof theme === 'string' && theme.trim().length > 0
+                ).map(theme => theme.trim());
+                
+                if (validThemes.length > 0) {
+                    console.log(`[Socket.io] Atualizando temas da sala ${room}:`);
+                    console.log(`[Socket.io] Antes: [${config.themes.join(', ')}]`);
+                    console.log(`[Socket.io] Depois: [${validThemes.join(', ')}]`);
+                    
+                    config.themes = validThemes;
+                    config.isSaved = false; // ✅ Marcar como não salva após alteração
+                    
+                    io.to(room).emit('themes_updated', { themes: config.themes });
+                    emitRoomConfig(room, config);
+                    
+                    console.log(`[Socket.io] ✅ Temas atualizados para sala ${room} - Status: NÃO SALVA`);
+                } else {
+                    console.log(`[Socket.io] No valid themes provided for room ${room}`);
+                }
+            } else {
+                console.log(`[Socket.io] Invalid themes data for room ${room}:`, themes);
+            }
 
         } catch (error) {
             console.error('[Socket.io] Error updating themes:', error);
@@ -545,10 +589,13 @@ io.on('connection', (socket) => {
             if (themes) config.themes = themes;
             if (duration) config.duration = duration;
             
-            config.isSaved = false;
+            config.isSaved = false; // ✅ Marcar como não salva após alteração
 
-            await saveRoomConfigToFirestore(room, config);
+            // ✅ NÃO salvar automaticamente no Firestore
+            // await saveRoomConfigToFirestore(room, config); // ❌ REMOVIDO
             emitRoomConfig(room, config);
+
+            console.log(`[Socket.io] Config updated for room ${room} (não salvo no Firestore)`);
 
         } catch (error) {
             console.error('[Socket.io] Error updating config:', error);
@@ -556,26 +603,48 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('save_room', async ({ room, roomName }) => {
+    socket.on('save_room', async ({ room, roomName, duration }) => {
         try {
             const config = roomConfigs[room];
             if (!config || socket.userId !== config.creatorId) {
-                throw new Error("Unauthorized save attempt");
+                console.log(`[Socket.io] Unauthorized save attempt by ${socket.userId}`);
+                return;
             }
 
-            config.isSaved = true;
-            await saveRoomConfigToFirestore(room, config);
+            console.log(`[Socket.io] Salvando sala ${room} no Firestore...`);
+
+            const roomData = {
+                name: roomName || room,
+                themes: config.themes || [],
+                duration: duration || config.duration || 60, // ✅ Usar duração fornecida
+                createdBy: socket.userId,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                isActive: true
+            };
+
+            await db.collection('saved_rooms').doc(room).set(roomData);
             
-            socket.emit('room_saved_success', { room });
+            // ✅ Atualizar config com nova duração
+            if (duration) {
+                config.duration = duration;
+            }
+            
+            // ✅ Marcar como salva
+            config.isSaved = true;
+            
+            console.log(`[Socket.io] ✅ Sala ${room} salva com sucesso!`);
+            
+            // ✅ Emitir confirmação de salvamento
+            socket.emit('room_saved_success');
             emitRoomConfig(room, config);
 
         } catch (error) {
             console.error('[Socket.io] Error saving room:', error);
-            socket.emit('error', { message: error.message });
+            socket.emit('room_save_error', { message: 'Erro ao salvar sala' });
         }
     });
 
-    // CORREÇÃO: start_round com controle adequado
+    // ✅ Remover salvamento automático de TODOS os outros eventos
     socket.on('start_round', async ({ room }) => {
         try {
             const config = roomConfigs[room];
@@ -584,7 +653,6 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            // CORREÇÃO: Verificar se já está ativo ou em countdown
             if (config.roundActive || config.roundEnded || config.isCountingDown) {
                 console.log(`[Socket.io] Cannot start round - round already active/ended/counting in room ${room}`);
                 return;
@@ -629,8 +697,7 @@ io.on('connection', (socket) => {
                 }))
             });
 
-            console.log(`[Socket.io] Answers saved for player ${nickname} in room ${room}`);
-            
+            console.log(`[Socket.io] Answers saved for player ${nickname} in room ${room}`);            
         } catch (error) {
             console.error('[Socket.io] Error saving answers:', error);
         }
@@ -646,10 +713,9 @@ io.on('connection', (socket) => {
             const config = roomConfigs[room];
             if (!config || !config.roundActive) {
                 console.log(`[Socket.io] Stop ignored - round not active in room ${room}`);
-                return; // CORREÇÃO: Retornar em vez de throw error
+                return;
             }
 
-            // CORREÇÃO: Encontrar admin para ser o validador
             const adminPlayer = Object.values(config.players).find(p => p.isCreator);
             if (!adminPlayer) {
                 console.log(`[Socket.io] No admin found in room ${room}`);
@@ -663,16 +729,16 @@ io.on('connection', (socket) => {
             if (!gameState.has(room)) {
                 initializeRoomState(room);
             }
-            gameState.get(room).validatorId = adminPlayer.userId; // CORREÇÃO: Admin como validador
+            gameState.get(room).validatorId = adminPlayer.userId;
 
-            await saveRoomConfigToFirestore(room, config);
+            // ✅ NÃO salvar automaticamente no Firestore
+            // await saveRoomConfigToFirestore(room, config); // ❌ REMOVIDO
 
             io.to(room).emit("round_ended");
             emitRoomConfig(room, config);
 
             console.log(`[Socket.io] Round ended for room ${room}, admin ${adminPlayer.nickname} is validator`);
 
-            // CORREÇÃO: Aguardar um tempo para que todos enviem suas respostas
             setTimeout(() => {
                 console.log(`[Socket.io] Iniciando validação após timeout na sala ${room}`);
                 const roomState = gameState.get(room);
@@ -685,7 +751,7 @@ io.on('connection', (socket) => {
                     console.log(`[Socket.io] Ainda sem respostas na sala ${room} - emitindo no_answers_to_validate`);
                     io.to(room).emit("no_answers_to_validate");
                 }
-            }, 2000); // CORREÇÃO: 2 segundos para aguardar respostas
+            }, 2000);
 
         } catch (error) {
             console.error('[Socket.io] Error in stop_round:', error);
@@ -829,7 +895,6 @@ io.on('connection', (socket) => {
                 return;
             }
             
-            // CORREÇÃO: Verificar se o usuário é admin
             if (socket.userId !== config.creatorId) {
                 console.log(`[Socket.io] Unauthorized new_round attempt by ${socket.userId} in room ${room}`);
                 return;
@@ -839,22 +904,21 @@ io.on('connection', (socket) => {
                 clearRoomLetters(room);
             }
 
-            // CORREÇÃO: Reset completo dos estados
             config.roundActive = false;
             config.roundEnded = false;
             config.stopClickedByMe = false;
             config.currentLetter = null;
             config.isCountingDown = false;
-            config.gameEnded = false; // CORREÇÃO: Reset gameEnded
+            config.gameEnded = false;
             
             if (gameState.has(room)) {
                 const roomState = gameState.get(room);
                 roomState.answers.clear();
                 roomState.currentValidation = null;
-                // NÃO limpar playerScores para manter pontuação total
             }
 
-            await saveRoomConfigToFirestore(room, config);
+            // ✅ NÃO salvar automaticamente no Firestore
+            // await saveRoomConfigToFirestore(room, config); // ❌ REMOVIDO
 
             console.log(`[Socket.io] New round started for room ${room}`);
 
@@ -880,25 +944,23 @@ io.on('connection', (socket) => {
                 return;
             }
             
-            // CORREÇÃO: Verificar se o usuário é admin
             if (socket.userId !== config.creatorId) {
                 console.log(`[Socket.io] Unauthorized end_game attempt by ${socket.userId} in room ${room}`);
                 return;
             }
             
-            // CORREÇÃO: Verificar se o jogo já foi encerrado
             if (config.gameEnded) {
                 console.log(`[Socket.io] Game already ended for room ${room}`);
                 return;
             }
             
-            // CORREÇÃO: Marcar jogo como encerrado
             config.gameEnded = true;
             config.roundActive = false;
             config.roundEnded = false;
             config.isCountingDown = false;
             
-            await saveRoomConfigToFirestore(room, config);
+            // ✅ NÃO salvar automaticamente no Firestore
+            // await saveRoomConfigToFirestore(room, config); // ❌ REMOVIDO
             
             console.log(`[Socket.io] Game ended for room ${room}`);
             
@@ -910,176 +972,139 @@ io.on('connection', (socket) => {
                     const playerConfig = config.players[playerId];
                     if (playerConfig) {
                         ranking.push({
-                            playerId: playerId,
+                            userId: playerId,
                             nickname: playerConfig.nickname,
-                            totalScore: totalScore
+                            score: totalScore
                         });
                     }
                 }
             }
-
-            ranking.sort((a, b) => b.totalScore - a.totalScore);
             
-            console.log(`[Socket.io] Final ranking for room ${room}:`, ranking.map(p => `${p.nickname}: ${p.totalScore}`));
+            ranking.sort((a, b) => b.score - a.score);
             
-            io.to(room).emit('game_ended', ranking);
-            
-            // CORREÇÃO: Limpar estados após um delay para permitir que o frontend processe
-            setTimeout(() => {
-                gameState.delete(room);
-                clearRoomLetters(room);
-                console.log(`[Socket.io] Room ${room} state cleared`);
-            }, 1000);
+            io.to(room).emit('game_ended', { ranking });
             
         } catch (error) {
-            console.error('[Socket.io] Error in end_game:', error);
+            console.error('[Socket.io] Error ending game:', error);
         }
     });
 
     socket.on('disconnect', () => {
         try {
+            const roomId = socket.room;
             const userId = socket.userId;
-            const room = socket.room;
-
-            console.log(`[Socket.io] Socket desconectado. userId: ${userId}, Sala: ${room}`);
-
-            if (userId && room && roomConfigs[room]) {
-                const wasAdmin = roomConfigs[room].players[userId]?.isCreator;
-                
-                delete roomConfigs[room].players[userId];
-
-                const remainingPlayers = Object.values(roomConfigs[room].players);
-                
-                if (remainingPlayers.length === 0) {
-                    console.log(`[Socket.io] Sala ${room} completamente vazia.`);
-                    delete roomConfigs[room];
-                    gameState.delete(room);
-                    clearRoomLetters(room);
-                } else if (wasAdmin) {
-                    const sortedPlayers = remainingPlayers.sort((a, b) => 
-                        new Date(a.joinedAt) - new Date(b.joinedAt)
-                    );
+            
+            console.log(`[Socket.io] Desconexão: ${socket.id} (userId: ${userId}, roomId: ${roomId})`);
+            
+            if (roomId && userId) {
+                const config = roomConfigs[roomId];
+                if (config && config.players) {
+                    delete config.players[userId];
+                    console.log(`[Socket.io] Jogador ${userId} removido da sala ${roomId}`);
                     
-                    const newAdmin = sortedPlayers[0];
-                    roomConfigs[room].creatorId = newAdmin.userId;
-                    
-                    Object.values(roomConfigs[room].players).forEach(p => p.isCreator = false);
-                    roomConfigs[room].players[newAdmin.userId].isCreator = true;
-                    
-                    console.log(`[Socket.io] Novo admin: ${newAdmin.nickname}`);
+                    // ✅ NÃO salvar automaticamente no Firestore
+                    // await saveRoomConfigToFirestore(roomId, config); // ❌ REMOVIDO
 
-                    const playersArray = Object.values(roomConfigs[room].players).sort((a, b) => {
-                        if (a.isCreator && !b.isCreator) return -1;
-                        if (!a.isCreator && b.isCreator) return 1;
-                        return new Date(a.joinedAt) - new Date(b.joinedAt);
-                    });
-
-                    io.to(room).emit('players_update', playersArray);
-                    emitRoomConfig(room, roomConfigs[room]);
-                    saveRoomConfigToFirestore(room, roomConfigs[room]);
+                    const playersArray = Object.values(config.players);
+                    io.to(roomId).emit('players_update', playersArray);
+                    emitRoomConfig(roomId, config);
                 }
             }
-
         } catch (error) {
             console.error('[Socket.io] Error on disconnect:', error);
         }
     });
 
-    socket.on('time_up', async ({ room }) => {
-        try {
-            console.log(`[Socket.io] ⏰ Tempo esgotado na sala ${room}`);
-            
-            const config = roomConfigs[room];
-            if (!config || !config.roundActive) {
-                console.log(`[Socket.io] Time up ignored - round not active in room ${room}`);
-                return;
-            }
-
-            const adminPlayer = Object.values(config.players).find(p => p.isCreator);
-            if (!adminPlayer) {
-                console.log(`[Socket.io] No admin found in room ${room} for time up`);
-                return;
-            }
-
-            config.roundActive = false;
-            config.roundEnded = true;
-            config.stopClickedByMe = 'TIME_UP';
-
-            if (!gameState.has(room)) {
-                initializeRoomState(room);
-            }
-            
-            const roomState = gameState.get(room);
-            roomState.validatorId = adminPlayer.userId;
-
-            await saveRoomConfigToFirestore(room, config);
-
-            io.to(room).emit("time_up_round_ended");
-            emitRoomConfig(room, config);
-
-            // CORREÇÃO: Aguardar mais tempo para que todos os clientes enviem suas respostas
-            console.log(`[Socket.io] ⏰ Aguardando 4 segundos para receber todas as respostas na sala ${room}`);
-            
-            setTimeout(() => {
-                console.log(`[Socket.io] ⏰ Verificando respostas após timeout na sala ${room}`);
-                const currentRoomState = gameState.get(room);
-                
-                if (!currentRoomState) {
-                    console.log(`[Socket.io] Room state not found for ${room}`);
-                    return;
-                }
-                
-                const answers = Array.from(currentRoomState.answers.values());
-                console.log(`[Socket.io] ⏰ Respostas encontradas após tempo esgotado: ${answers.length}`);
-                
-                // Log das respostas para debug
-                answers.forEach((playerData, index) => {
-                    console.log(`[Socket.io] ⏰ Player ${index + 1}: ${playerData.nickname} - ${playerData.answers.length} respostas`);
-                });
-                
-                if (answers.length > 0) {
-                    console.log(`[Socket.io] ⏰ Iniciando validação com ${answers.length} jogadores`);
-                    startValidation(room);
-                } else {
-                    console.log(`[Socket.io] ⏰ Nenhuma resposta encontrada - emitindo no_answers_to_validate`);
-                    io.to(room).emit("no_answers_to_validate");
-                }
-            }, 4000); // CORREÇÃO: 4 segundos em vez de 1.5
-            
-        } catch (error) {
-            console.error('[Socket.io] Error in time_up:', error);
-        }
-    });
-
     socket.on('get_room_config', async ({ room }) => {
         try {
-            const config = roomConfigs[room];
+            console.log(`[Socket.io] get_room_config solicitado para sala: ${room}`);
+            
+            let config = roomConfigs[room];
+            
+            // ✅ Se não está na memória, tentar recuperar do Firestore
+            if (!config) {
+                console.log(`[Socket.io] Sala ${room} não encontrada na memória, verificando Firestore...`);
+                const savedConfig = await getRoomConfigFromFirestore(room);
+                
+                if (savedConfig && savedConfig.isSaved) {
+                    console.log(`[Socket.io] Configuração salva recuperada do Firestore para sala ${room}`);
+                    config = savedConfig;
+                    // ✅ Adicionar na memória para próximas consultas
+                    roomConfigs[room] = config;
+                }
+            }
+            
             if (config) {
+                console.log(`[Socket.io] Enviando configuração da sala ${room}:`, {
+                    themes: config.themes,
+                    duration: config.duration,
+                    isSaved: config.isSaved
+                });
+                
                 socket.emit('room_config', {
-                    themes: config.themes || [],
-                    duration: config.duration || 180,
+                    themes: config.themes || ['Nome', 'Cidade', 'País', 'Marca', 'Cor', 'Animal'],
+                    duration: config.duration || 60,
                     roundActive: config.roundActive || false,
                     roundEnded: config.roundEnded || false,
                     currentLetter: config.currentLetter || null,
-                    isSaved: config.isSaved || false
+                    isSaved: config.isSaved || false, // ✅ Manter o status correto
+                    creatorId: config.creatorId || null
                 });
             } else {
+                console.log(`[Socket.io] Sala ${room} não encontrada, enviando configuração padrão`);
                 socket.emit('room_config', {
-                    themes: [],
-                    duration: 180,
+                    themes: ['Nome', 'Cidade', 'País', 'Marca', 'Cor', 'Animal'],
+                    duration: 60,
                     roundActive: false,
                     roundEnded: false,
                     currentLetter: null,
-                    isSaved: false
+                    isSaved: false,
+                    creatorId: null
                 });
             }
         } catch (error) {
-            console.error('[Backend] Error in get_room_config:', error);
+            console.error('[Socket.io] Error in get_room_config:', error);
+            socket.emit('room_config', {
+                themes: ['Nome', 'Cidade', 'País', 'Marca', 'Cor', 'Animal'],
+                duration: 60,
+                roundActive: false,
+                roundEnded: false,
+                currentLetter: null,
+                isSaved: false,
+                creatorId: null
+            });
+        }
+    });
+
+    socket.on('update_duration', async ({ room, duration }) => {
+        try {
+            const config = roomConfigs[room];
+            if (!config || socket.userId !== config.creatorId) {
+                console.log(`[Socket.io] Unauthorized duration update attempt by ${socket.userId}`);
+                return;
+            }
+
+            if (typeof duration === 'number' && duration > 0) {
+                console.log(`[Socket.io] Atualizando duração da sala ${room}: ${config.duration}s → ${duration}s`);
+                
+                config.duration = duration;
+                config.isSaved = false; // ✅ Marcar como não salva após alteração
+                
+                io.to(room).emit('duration_updated', { duration });
+                emitRoomConfig(room, config);
+                
+                console.log(`[Socket.io] ✅ Duração atualizada para sala ${room} - Status: NÃO SALVA`);
+            } else {
+                console.log(`[Socket.io] Invalid duration for room ${room}:`, duration);
+            }
+
+        } catch (error) {
+            console.error('[Socket.io] Error updating duration:', error);
         }
     });
 });
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-    console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });

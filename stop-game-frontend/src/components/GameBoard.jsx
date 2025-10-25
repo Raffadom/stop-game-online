@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { socket } from "../socket";
 import Modal from "./Modal";
 
-export default function GameBoard({
+function GameBoard({
   roundStarted,
   roundEnded,
   onResetRound,
@@ -39,15 +39,16 @@ export default function GameBoard({
   const [currentValidated, setCurrentValidated] = useState(false);
   const [roundScores, setRoundScores] = useState(null);
   const [finalRanking, setFinalRanking] = useState(null);
+  const [answersSubmitted, setAnswersSubmitted] = useState(false);
   
   const maxThemes = 20;
 
   // Temas padrão
   const defaultThemes = [
-    "Nome", "Cidade", "País", "Marca", "Cor", "Animal", "CEP", "Objeto", "Fruta", "Filmes/Séries", "Dor"
+    "Nome", "Cidade", "País", "Marca", "Cor", "Animal"
   ];
 
-  // CORREÇÃO: Definir função updateAnswersWithThemes sem dependências circulares
+  // ✅ Função para atualizar respostas com temas
   const updateAnswersWithThemes = useCallback((themes) => {
     if (themes && themes.length > 0) {
       console.log('[GameBoard] Atualizando respostas com temas:', themes);
@@ -59,41 +60,9 @@ export default function GameBoard({
         validated: false 
       })));
     }
-  }, []); // CORREÇÃO: Sem dependências para evitar loops
+  }, []);
 
-  // CORREÇÃO: Inicializar temas apenas uma vez
-  useEffect(() => {
-    if (isAdmin && (!roomThemes || roomThemes.length === 0) && setRoomThemes && room) {
-      console.log('[GameBoard] Admin inicializando temas padrão para sala:', room);
-      setRoomThemes(defaultThemes);
-      socket.emit("update_themes", { room, themes: defaultThemes });
-    }
-  }, [isAdmin, room]); // CORREÇÃO: Remover setRoomThemes das dependências
-
-  // CORREÇÃO: Solicitar configuração apenas na primeira vez
-  useEffect(() => {
-    if (room && (!roomThemes || roomThemes.length === 0)) {
-      console.log('[GameBoard] Solicitando configuração da sala:', room);
-      socket.emit("get_room_config", { room });
-    }
-  }, [room]); // CORREÇÃO: Apenas room como dependência
-
-  // CORREÇÃO: Inicializar respostas apenas quando roomThemes mudar significativamente
-  useEffect(() => {
-    if (roomThemes && roomThemes.length > 0 && answers.length === 0) {
-      console.log('[GameBoard] Inicializando respostas pela primeira vez');
-      updateAnswersWithThemes(roomThemes);
-    }
-  }, [roomThemes, updateAnswersWithThemes]); // CORREÇÃO: Adicionar answers.length === 0
-
-  const handleRevealAnswer = useCallback(() => {
-    if (!canReveal || isRevealing) return;
-    
-    setIsRevealing(true);
-    socket.emit("reveal_answer", { room });
-  }, [canReveal, isRevealing, room]);
-
-  // CORREÇÃO: Função para enviar respostas
+  // ✅ Função para enviar respostas
   const submitAnswers = useCallback(() => {
     if (!answers || answers.length === 0) {
       console.log('[GameBoard] Nenhuma resposta para enviar');
@@ -109,23 +78,7 @@ export default function GameBoard({
     socket.emit("submit_answers", { room, answers: answersToSubmit });
   }, [answers, room]);
 
-  // CORREÇÃO: Enviar respostas apenas uma vez quando rodada terminar
-  const [answersSubmitted, setAnswersSubmitted] = useState(false);
-  
-  useEffect(() => {
-    if (roundEnded && answers.length > 0 && !answersSubmitted) {
-      console.log('[GameBoard] Rodada terminou - enviando respostas automaticamente');
-      submitAnswers();
-      setAnswersSubmitted(true);
-    }
-    
-    // Reset quando nova rodada começar
-    if (roundStarted && !roundEnded) {
-      setAnswersSubmitted(false);
-    }
-  }, [roundEnded, submitAnswers, answers.length, answersSubmitted, roundStarted]);
-
-  // CORREÇÃO: Função para clicar STOP
+  // ✅ Função para clicar STOP
   const handleStopClick = useCallback(() => {
     console.log('[GameBoard] Usuário clicou STOP - enviando respostas');
     submitAnswers();
@@ -135,253 +88,15 @@ export default function GameBoard({
     }
   }, [submitAnswers, handleStopRound]);
 
-  // CORREÇÃO: Socket listeners sem dependências circulares
-  useEffect(() => {
-    const handleRoundStarted = (data) => {
-      console.log('[GameBoard] Rodada iniciada com letra:', data.letter);
-      setIsRoundActive(true);
-      setRevealed(false);
-      setCanReveal(false);
-      setIsRevealing(false);
-      setShowRoundResult(false);
-      setRoundScore(0);
-      setAnswersSubmitted(false); // CORREÇÃO: Reset flag
-      
-      // CORREÇÃO: Resetar respostas para nova rodada
-      if (roomThemes && roomThemes.length > 0) {
-        console.log('[GameBoard] Resetando respostas para nova rodada');
-        updateAnswersWithThemes(roomThemes);
-      }
-    };
+  // ✅ Função para revelar resposta
+  const handleRevealAnswer = useCallback(() => {
+    if (!canReveal || isRevealing) return;
+    
+    setIsRevealing(true);
+    socket.emit("reveal_answer", { room });
+  }, [canReveal, isRevealing, room]);
 
-    const handleRoundEnded = () => {
-      console.log('[GameBoard] Rodada finalizada');
-      setIsRoundActive(false);
-      setCanReveal(true);
-    };
-
-    const handleTimeUpRoundEnded = () => {
-      console.log('[GameBoard] ⏰ Tempo esgotado - rodada finalizada');
-      
-      // CORREÇÃO: Enviar respostas imediatamente quando tempo esgotar
-      if (answers.length > 0 && !answersSubmitted) {
-        console.log('[GameBoard] ⏰ Enviando respostas devido ao tempo esgotado');
-        submitAnswers();
-        setAnswersSubmitted(true);
-      }
-      
-      setRoundScore(0);
-      setShowRoundResult(false);
-      setIsRevealing(false);
-      setCanReveal(false);
-      setRevealed(false);
-      setIsRoundActive(false); // CORREÇÃO: Marcar rodada como inativa
-    };
-
-    const handleNewRoundStarted = () => {
-      console.log('[GameBoard] Nova rodada iniciada - resetando estados');
-      
-      // CORREÇÃO: Resetar completamente o array de respostas
-      if (roomThemes && roomThemes.length > 0) {
-        console.log('[GameBoard] Resetando respostas para temas:', roomThemes);
-        setAnswers(roomThemes.map(theme => ({ 
-          theme, 
-          answer: "", 
-          points: null, 
-          reason: "", 
-          validated: false 
-        })));
-      } else {
-        setAnswers([]);
-      }
-      
-      // Resetar todos os estados de validação e pontuação
-      setRevealed(false);
-      setCanReveal(false);
-      setIsRevealing(false);
-      setShowRoundResult(false);
-      setRoundScore(null); // CORREÇÃO: null em vez de 0
-      setTotalPoints(null); // CORREÇÃO: Manter total points para não perder histórico
-      setIsRoundActive(false);
-      setValidationData(null);
-      setIsValidating(false);
-      setShowModal(false);
-      setAnswersSubmitted(false);
-      setCurrentValidated(false);
-      
-      console.log('[GameBoard] Estados resetados para nova rodada');
-    };
-
-    const handleRoomConfig = (config) => {
-      console.log('[GameBoard] Configuração da sala recebida:', config);
-      if (config.themes && config.themes.length > 0 && setRoomThemes) {
-        console.log('[GameBoard] Definindo temas da configuração:', config.themes);
-        setRoomThemes(config.themes);
-        // Não chamar updateAnswersWithThemes aqui - será chamado pelo useEffect
-      }
-    };
-
-    const handleStartValidation = (data) => {
-      console.log('[GameBoard] 🎯 start_validation received:', data);
-      console.log('[GameBoard] - Current user ID:', userId);
-      console.log('[GameBoard] - Judge ID:', data.judgeId);
-      console.log('[GameBoard] - Is judge:', userId === data.judgeId);
-      
-      if (data.current) {
-        setValidationData(data.current);
-        setIsValidating(false); // CORREÇÃO: Reset estado
-        setCurrentValidated(false); // CORREÇÃO: Reset estado
-        setRevealed(false); // CORREÇÃO: Reset revealed
-        
-        if (userId === data.judgeId) {
-          console.log('[GameBoard] 👨‍⚖️ User is judge - showing modal');
-          setShowModal(true);
-          setCanReveal(true);
-        } else {
-          console.log('[GameBoard] 👥 User is not judge - waiting for validation');
-          setShowModal(false);
-          setCanReveal(false);
-        }
-      } else {
-        console.error('[GameBoard] ❌ start_validation received without current data');
-      }
-    };
-
-    const handleAnswerValidated = (data) => {
-      console.log('[GameBoard] Próxima resposta para validar:', data.current);
-      if (data.current) {
-        setValidationData(data.current);
-        setCurrentValidated(false); // CORREÇÃO: Reset para permitir nova validação
-        setIsValidating(false); // CORREÇÃO: Reset estado de validação
-        setRevealed(false); // CORREÇÃO: Reset revealed para próxima resposta
-      }
-    };
-
-    const handleValidationComplete = (data) => {
-      console.log('[GameBoard] Validation complete data received:', data);
-      
-      if (data.myAnswers && data.roundComplete) {
-        const updatedAnswers = [...answers];
-        
-        data.myAnswers.forEach((serverAnswer) => {
-          const answerIndex = updatedAnswers.findIndex(a => a.theme === serverAnswer.theme);
-          if (answerIndex !== -1) {
-            updatedAnswers[answerIndex] = {
-              ...updatedAnswers[answerIndex],
-              answer: serverAnswer.answer || updatedAnswers[answerIndex].answer,
-              points: serverAnswer.points || 0,
-              reason: serverAnswer.reason || '',
-              validated: true
-            };
-          }
-        });
-        
-        setAnswers(updatedAnswers);
-        
-        const roundPoints = data.myScore || 0;
-        const totalPoints = data.myTotalScore || 0;
-        
-        setTotalPoints(totalPoints);  
-        setRoundScore(roundPoints);
-        setShowRoundResult(true);
-        
-        setShowModal(false);
-        setValidationData(null);
-        setIsValidating(false);
-        setIsRevealing(false);
-        setCanReveal(false);
-        setRevealed(false);
-      }
-    };
-
-    const handleValidationCompleteForPlayer = (data) => {
-      console.log('[GameBoard] Validation complete for specific player:', data);
-      if (data.playerId === userId) {
-        handleValidationComplete(data);
-      }
-    };
-
-    const handleThemesUpdated = (data) => {
-      console.log('[GameBoard] Temas atualizados:', data.themes);
-      if (data.themes && data.themes.length > 0 && setRoomThemes) {
-        setRoomThemes(data.themes);
-        // updateAnswersWithThemes será chamado pelo useEffect
-      }
-    };
-
-    const handleReveal = () => {
-      console.log('[GameBoard] Revelar respostas ativado');
-      setRevealed(true);
-      setIsRevealing(false); // CORREÇÃO: Parar o loading
-    };
-
-    const handleNoAnswersToValidate = () => {
-      console.log('[GameBoard] 📋 Não há respostas para validar');
-      setShowRoundResult(true);
-      setRoundScore(0);
-      setIsValidating(false);
-      setShowModal(false);
-      
-      if (setAlertState) {
-        setAlertState({
-          isVisible: true,
-          message: "Nenhum jogador enviou respostas para validar.",
-          type: "info"
-        });
-      }
-    };
-
-    const handleGameEnded = (ranking) => {
-      console.log('[GameBoard] 🏁 Jogo encerrado - ranking final:', ranking);
-      setFinalRanking(ranking);
-      setShowRoundResult(false);
-      setShowResults(false);
-      setRoundScores(null);
-      
-      // Reset todos os estados do jogo
-      setIsValidating(false);
-      setShowModal(false);
-      setValidationData(null);
-      setIsRevealing(false);
-      setCanReveal(false);
-      setRevealed(false);
-      setIsRoundActive(false);
-      setAnswersSubmitted(false);
-    };
-
-    // Socket listeners
-    socket.on("round_started", handleRoundStarted);
-    socket.on("round_ended", handleRoundEnded);
-    socket.on("time_up_round_ended", handleTimeUpRoundEnded);
-    socket.on("new_round_started", handleNewRoundStarted);
-    socket.on("room_config", handleRoomConfig);
-    socket.on("start_validation", handleStartValidation);
-    socket.on("answer_validated", handleAnswerValidated);
-    socket.on("validation_complete", handleValidationComplete);
-    socket.on("validation_complete_for_player", handleValidationCompleteForPlayer);
-    socket.on("themes_updated", handleThemesUpdated);
-    socket.on("reveal", handleReveal);
-    socket.on("no_answers_to_validate", handleNoAnswersToValidate);
-    socket.on("game_ended", handleGameEnded); // CORREÇÃO: Adicionar listener
-
-    return () => {
-      socket.off("round_started", handleRoundStarted);
-      socket.off("round_ended", handleRoundEnded);
-      socket.off("time_up_round_ended", handleTimeUpRoundEnded);
-      socket.off("new_round_started", handleNewRoundStarted);
-      socket.off("room_config", handleRoomConfig);
-      socket.off("start_validation", handleStartValidation);
-      socket.off("answer_validated", handleAnswerValidated);
-      socket.off("validation_complete", handleValidationComplete);
-      socket.off("validation_complete_for_player", handleValidationCompleteForPlayer);
-      socket.off("themes_updated", handleThemesUpdated);
-      socket.off("reveal", handleReveal);
-      socket.off("no_answers_to_validate", handleNoAnswersToValidate);
-      socket.off("game_ended", handleGameEnded); // CORREÇÃO: Remover listener
-    };
-  }, [userId, answers, setRoomThemes, setAlertState, roomThemes, updateAnswersWithThemes]);
-
-  // CORREÇÃO: Funções com controle de múltiplos cliques
+  // ✅ Funções de gerenciamento de sala
   const handleNewRound = useCallback(() => {
     if (!room || !isAdmin) {
       console.log('[GameBoard] Cannot start new round - not admin or no room');
@@ -392,7 +107,6 @@ export default function GameBoard({
     setShowRoundResult(false);
     setRoundScore(null);
     
-    // Resetar respostas localmente
     if (roomThemes && roomThemes.length > 0) {
       setAnswers(roomThemes.map(theme => ({ 
         theme, 
@@ -428,95 +142,61 @@ export default function GameBoard({
     }, 100);
   }, []);
 
-  // CORREÇÃO: Componente de ranking final melhorado
-  const FinalRanking = () => (
-    <section className="bg-white p-6 rounded-xl shadow-lg dark:bg-gray-800" data-testid="final-ranking">
-      <h3 className="text-3xl font-bold text-center text-blue-700 dark:text-blue-400 mb-6" data-testid="final-ranking-title">
-        🏆 Ranking Final da Partida 🏆
-      </h3>
-      
-      {finalRanking && finalRanking.length > 0 ? (
-        <ol className="space-y-3" data-testid="ranking-list">
-          {finalRanking.map((p, idx) => (
-            <li
-              key={p.playerId}
-              className={`flex justify-between items-center p-4 rounded-lg ${
-                idx === 0
-                  ? "bg-yellow-400 text-gray-900 font-bold"
-                  : idx === 1
-                  ? "bg-gray-300 text-gray-800 font-semibold"
-                  : idx === 2
-                  ? "bg-orange-300 text-gray-800 font-semibold"
-                  : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100"
-              }`}
-              data-testid={`ranking-item-${idx}`}
-            >
-              <span className="flex items-center gap-2" data-testid={`ranking-player-${idx}`}>
-                {idx === 0 && "🥇"}
-                {idx === 1 && "🥈"} 
-                {idx === 2 && "🥉"}
-                {idx > 2 && `${idx + 1}.`}
-                {p.nickname}
-              </span>
-              <span className="text-2xl font-bold" data-testid={`ranking-score-${idx}`}>
-                {p.totalScore || 0} pts
-              </span>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <div className="text-center text-gray-600 dark:text-gray-400">
-          <p>Nenhum dado de ranking disponível</p>
-        </div>
-      )}
-      
-      <div className="text-center mt-8 space-y-4" data-testid="final-ranking-actions">
-        {isAdmin && (
-          <button
-            onClick={handleNewRound}
-            className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold shadow-md transition-colors mr-4"
-            data-testid="new-game-btn"
-          >
-            🔄 Novo Jogo
-          </button>
-        )}
-        <button
-          onClick={handleLeaveRoom}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold shadow-md transition-colors"
-          data-testid="back-to-lobby-btn"
-        >
-          🏠 Voltar ao Lobby
-        </button>
-      </div>
-    </section>
-  );
+  // ✅ Estados para gerenciar sala (mover para cima, antes dos handlers duplicados)
+  const [duration, setDuration] = useState(60);
+  const [isSaved, setIsSaved] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // CORREÇÃO: Adicionar função handleAddTheme que estava faltando
-  const handleAddTheme = () => {
+  // ✅ Função para salvar sala
+  const handleSaveRoomConfig = useCallback(() => {
+    if (!room || !isAdmin) {
+      console.log('[GameBoard] Cannot save room - not admin or no room');
+      return;
+    }
+    
+    console.log('[GameBoard] Salvando configuração da sala...', {
+      room,
+      themes: roomThemes,
+      duration: roomDuration || duration // ✅ Usar roomDuration se disponível
+    });
+    
+    socket.emit("save_room", { 
+      room, 
+      roomName: room,
+      duration: roomDuration || duration // ✅ Incluir duração no salvamento
+    });
+  }, [room, isAdmin, roomThemes, roomDuration, duration]);
+
+  // ✅ Funções de gerenciamento de temas (corrigir para marcar como alterado)
+  const handleAddTheme = useCallback(() => {
     if (!newTheme.trim() || !roomThemes || roomThemes.includes(newTheme.trim())) return;
     
     const updatedThemes = [...roomThemes, newTheme.trim()];
     if (setRoomThemes) setRoomThemes(updatedThemes);
     setNewTheme("");
+    setHasUnsavedChanges(true); // ✅ Marcar como alterado
+    setIsSaved(false); // ✅ Não está mais salva
     
     socket.emit("update_themes", { room, themes: updatedThemes });
-  };
+  }, [newTheme, roomThemes, setRoomThemes, room]);
 
-  // CORREÇÃO: Adicionar função handleRemoveTheme que estava faltando
-  const handleRemoveTheme = (index) => {
+  const handleRemoveTheme = useCallback((index) => {
     if (!roomThemes) return;
     const updatedThemes = roomThemes.filter((_, i) => i !== index);
     if (setRoomThemes) setRoomThemes(updatedThemes);
+    setHasUnsavedChanges(true); // ✅ Marcar como alterado
+    setIsSaved(false); // ✅ Não está mais salva
     
     socket.emit("update_themes", { room, themes: updatedThemes });
-  };
+  }, [roomThemes, setRoomThemes, room]);
 
-  const handleAnswerChange = (index, value) => {
+  const handleAnswerChange = useCallback((index, value) => {
     const newAnswers = [...answers];
     newAnswers[index].answer = value;
     setAnswers(newAnswers);
-  };
+  }, [answers]);
 
+  // ✅ Adicionar função handleValidate que está faltando
   const handleValidate = useCallback((isValid) => {
     if (!canReveal || !validationData || isValidating || currentValidated) {
       console.log('[GameBoard] Validation blocked:', { canReveal, validationData: !!validationData, isValidating, currentValidated });
@@ -529,7 +209,311 @@ export default function GameBoard({
     socket.emit("validate_answer", { valid: isValid, room });
   }, [canReveal, validationData, isValidating, room, currentValidated]);
 
-  // CORREÇÃO: Adicionar componente ValidationModal que estava faltando
+  // ✅ CORRIGIR: Inicializar respostas quando temas mudarem
+  useEffect(() => {
+    if (roomThemes && roomThemes.length > 0) {
+      console.log('[GameBoard] Atualizando respostas com temas:', roomThemes);
+      // ✅ SEMPRE atualizar quando temas mudarem, não só quando answers.length === 0
+      setAnswers(roomThemes.map(theme => ({ 
+        theme, 
+        answer: "", 
+        points: null, 
+        reason: "", 
+        validated: false 
+      })));
+    }
+  }, [roomThemes]); // ✅ REMOVER answers.length da dependência
+
+  // ✅ CORRIGIR: Preservar respostas quando temas são atualizados
+  useEffect(() => {
+    if (roomThemes && roomThemes.length > 0 && answers.length > 0) {
+      console.log('[GameBoard] Preservando respostas existentes ao atualizar temas');
+      
+      setAnswers(prevAnswers => {
+        const newAnswers = roomThemes.map(theme => {
+          // ✅ Procurar resposta existente para este tema
+          const existingAnswer = prevAnswers.find(a => a.theme === theme);
+          
+          if (existingAnswer) {
+            // ✅ Manter resposta existente
+            return existingAnswer;
+          } else {
+            // ✅ Criar nova resposta vazia para tema novo
+            return {
+              theme,
+              answer: "",
+              points: null,
+              reason: "",
+              validated: false
+            };
+          }
+        });
+        
+        return newAnswers;
+      });
+    }
+  }, [roomThemes, answers.length]);
+
+  // ✅ ADICIONAR: Escutar mudanças na duração do roomDuration (props)
+  useEffect(() => {
+    if (typeof roomDuration === 'number' && roomDuration !== duration) {
+      console.log('[GameBoard] Duração alterada pelo Timer:', roomDuration);
+      setDuration(roomDuration);
+      setHasUnsavedChanges(true); // ✅ Marcar como alterado
+      setIsSaved(false); // ✅ Não está mais salva
+    }
+  }, [roomDuration, duration]);
+
+  // ✅ Socket listeners existente...
+  useEffect(() => {
+    console.log('[GameBoard] Configurando event listeners');
+
+    const handleRoomConfig = (config) => {
+      console.log('[GameBoard] Configuração da sala recebida:', config);
+      
+      if (config.themes && config.themes.length > 0 && setRoomThemes) {
+        console.log('[GameBoard] Aplicando temas da configuração recebida:', config.themes);
+        setRoomThemes(config.themes);
+      }
+      
+      // ✅ Atualizar duração
+      if (typeof config.duration === 'number') {
+        setDuration(config.duration);
+      }
+      
+      // ✅ Atualizar status de salva
+      setIsSaved(config.isSaved || false);
+      setHasUnsavedChanges(false); // ✅ Resetar mudanças não salvas
+    };
+
+    const handleThemesUpdated = ({ themes: newThemes }) => {
+      console.log('[GameBoard] Temas atualizados recebidos:', newThemes);
+      if (setRoomThemes) {
+        setRoomThemes(newThemes);
+      }
+      setHasUnsavedChanges(true); // ✅ Marcar como alterado
+      setIsSaved(false); // ✅ Não está mais salva
+    };
+
+    // ✅ Handler para quando sala é salva
+    const handleRoomSaved = () => {
+      console.log('[GameBoard] Sala salva com sucesso!');
+      setIsSaved(true);
+      setHasUnsavedChanges(false);
+    };
+
+    // ✅ REMOVER handleDurationUpdated - não precisamos mais
+    // A duração é controlada pelo Timer component
+
+    const handleRoundStarted = (data) => {
+      console.log('[GameBoard] Rodada iniciada com letra:', data.letter);
+      setIsRoundActive(true);
+      setRevealed(false);
+      setCanReveal(false);
+      setIsRevealing(false);
+      setShowRoundResult(false);
+      setRoundScore(0);
+      setAnswersSubmitted(false);
+      
+      // ✅ Usar callback para evitar dependência de roomThemes
+      setAnswers(prevAnswers => {
+        if (roomThemes && roomThemes.length > 0) {
+          console.log('[GameBoard] Resetando respostas para nova rodada');
+          return roomThemes.map(theme => ({ 
+            theme, 
+            answer: "", 
+            points: null, 
+            reason: "", 
+            validated: false 
+          }));
+        }
+        return prevAnswers;
+      });
+    };
+
+    const handleRoundEnded = () => {
+      console.log('[GameBoard] Rodada finalizada');
+      setIsRoundActive(false);
+      setCanReveal(true);
+    };
+
+    const handleTimeUpRoundEnded = () => {
+      console.log('[GameBoard] ⏰ Tempo esgotado - rodada finalizada');
+      
+      // ✅ Usar callback para evitar dependência
+      setAnswers(prevAnswers => {
+        if (prevAnswers.length > 0 && !answersSubmitted) {
+          console.log('[GameBoard] ⏰ Enviando respostas devido ao tempo esgotado');
+          const answersToSubmit = prevAnswers.map(a => ({
+            theme: a.theme,
+            answer: a.answer || ""
+          }));
+          socket.emit("submit_answers", { room, answers: answersToSubmit });
+          setAnswersSubmitted(true);
+        }
+        return prevAnswers;
+      });
+      
+      setRoundScore(0);
+      setShowRoundResult(false);
+      setIsRevealing(false);
+      setCanReveal(false);
+      setRevealed(false);
+      setIsRoundActive(false);
+    };
+
+    const handleNewRoundStarted = () => {
+      console.log('[GameBoard] Nova rodada iniciada - resetando estados');
+      
+      // ✅ Usar callback para evitar dependência
+      setAnswers(prevAnswers => {
+        if (roomThemes && roomThemes.length > 0) {
+          console.log('[GameBoard] Resetando respostas para temas:', roomThemes);
+          return roomThemes.map(theme => ({ 
+            theme, 
+            answer: "", 
+            points: null, 
+            reason: "", 
+            validated: false 
+          }));
+        }
+        return [];
+      });
+      
+      setRevealed(false);
+      setCanReveal(false);
+      setIsRevealing(false);
+      setShowRoundResult(false);
+      setRoundScore(null);
+      setIsRoundActive(false);
+      setValidationData(null);
+      setIsValidating(false);
+      setShowModal(false);
+      setAnswersSubmitted(false);
+      setCurrentValidated(false);
+    };
+
+    const handleStartValidation = (data) => {
+      console.log('[GameBoard] Validation started:', data);
+      setValidationData(data);
+      setShowModal(true);
+      setCanReveal(false);
+      setRevealed(false);
+      setIsRevealing(false);
+      setCurrentValidated(false);
+    };
+
+    const handleReveal = (data) => {
+      console.log('[GameBoard] Answer revealed:', data);
+      setRevealed(true);
+      setCanReveal(true);
+      setIsRevealing(false);
+    };
+
+    const handleAnswerValidated = (data) => {
+      console.log('[GameBoard] Answer validated:', data);
+      setIsValidating(false);
+      setCurrentValidated(false);
+    };
+
+    const handleValidationComplete = (data) => {
+      console.log('[GameBoard] Validation complete:', data);
+      setShowModal(false);
+      setValidationData(null);
+      setCanReveal(false);
+      setRevealed(false);
+    };
+
+    const handleValidationCompleteForPlayer = (data) => {
+      console.log('[GameBoard] Validation complete for player:', data);
+      
+      if (data.myAnswers && Array.isArray(data.myAnswers)) {
+        setAnswers(prevAnswers => {
+          return prevAnswers.map(answer => {
+            const validatedAnswer = data.myAnswers.find(va => va.theme === answer.theme);
+            if (validatedAnswer) {
+              return {
+                ...answer,
+                points: validatedAnswer.points,
+                reason: validatedAnswer.reason,
+                validated: true
+              };
+            }
+            return answer;
+          });
+        });
+      }
+      
+      if (typeof data.myScore === 'number') {
+        setRoundScore(data.myScore);
+        setShowRoundResult(true);
+      }
+      
+      if (typeof data.myTotalScore === 'number') {
+        setTotalPoints(data.myTotalScore);
+      }
+    };
+
+    const handleGameEnded = (ranking) => {
+      console.log('[GameBoard] Game ended with ranking:', ranking);
+      setFinalRanking(ranking);
+      setIsRoundActive(false);
+    };
+
+    const handleNoAnswersToValidate = () => {
+      console.log('[GameBoard] No answers to validate');
+      setShowModal(false);
+      setValidationData(null);
+    };
+
+    // ✅ Registrar listeners
+    socket.on('room_config', handleRoomConfig);
+    socket.on('themes_updated', handleThemesUpdated);
+    socket.on('room_saved_success', handleRoomSaved);
+    // socket.on('duration_updated', handleDurationUpdated); // ✅ REMOVER
+    socket.on("round_started", handleRoundStarted);
+    socket.on("round_ended", handleRoundEnded);
+    socket.on("time_up_round_ended", handleTimeUpRoundEnded);
+    socket.on("new_round_started", handleNewRoundStarted);
+    socket.on("start_validation", handleStartValidation);
+    socket.on("reveal", handleReveal);
+    socket.on("answer_validated", handleAnswerValidated);
+    socket.on("validation_complete", handleValidationComplete);
+    socket.on("validation_complete_for_player", handleValidationCompleteForPlayer);
+    socket.on("game_ended", handleGameEnded);
+    socket.on("no_answers_to_validate", handleNoAnswersToValidate);
+
+    // ✅ Cleanup
+    return () => {
+      socket.off('room_config', handleRoomConfig);
+      socket.off('themes_updated', handleThemesUpdated);
+      socket.off('room_saved_success', handleRoomSaved);
+      // socket.off('duration_updated', handleDurationUpdated); // ✅ REMOVER
+      socket.off("round_started", handleRoundStarted);
+      socket.off("round_ended", handleRoundEnded);
+      socket.off("time_up_round_ended", handleTimeUpRoundEnded);
+      socket.off("new_round_started", handleNewRoundStarted);
+      socket.off("start_validation", handleStartValidation);
+      socket.off("reveal", handleReveal);
+      socket.off("answer_validated", handleAnswerValidated);
+      socket.off("validation_complete", handleValidationComplete);
+      socket.off("validation_complete_for_player", handleValidationCompleteForPlayer);
+      socket.off("game_ended", handleGameEnded);
+      socket.off("no_answers_to_validate", handleNoAnswersToValidate);
+    };
+  }, [room, setRoomThemes]);
+
+  // ✅ useEffect separado para solicitar configuração inicial
+  useEffect(() => {
+    if (room) {
+      console.log('[GameBoard] Solicitando configuração inicial da sala:', room);
+      socket.emit('get_room_config', { room });
+    }
+  }, [room]); // ✅ Executar apenas quando 'room' mudar
+
+  // ...existing code do resto do componente
+
+  // ✅ Componentes
   const ValidationModal = () => {
     if (!validationData) return null;
 
@@ -546,10 +530,6 @@ export default function GameBoard({
             </div>
             <div className="text-lg font-semibold">
               📋 Tema: <span className="text-purple-600">{validationData.theme}</span>
-            </div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">
-              Jogador {(validationData.currentPlayerIndex || 0) + 1} de {validationData.totalPlayers || 0} | 
-              Tema {(validationData.themeIndex || 0) + 1} de {validationData.totalThemes || 0}
             </div>
           </div>
 
@@ -605,27 +585,107 @@ export default function GameBoard({
     );
   };
 
-  // Render principal
+  const FinalRanking = () => (
+    <section className="bg-white p-6 rounded-xl shadow-lg dark:bg-gray-800">
+      <h3 className="text-3xl font-bold text-center text-blue-700 dark:text-blue-400 mb-6">
+        🏆 Ranking Final da Partida 🏆
+      </h3>
+      
+      {finalRanking && finalRanking.length > 0 ? (
+        <ol className="space-y-3">
+          {finalRanking.map((p, idx) => (
+            <li
+              key={p.playerId}
+              className={`flex justify-between items-center p-4 rounded-lg ${
+                idx === 0 ? "bg-yellow-400 text-gray-900 font-bold" :
+                idx === 1 ? "bg-gray-300 text-gray-800 font-semibold" :
+                idx === 2 ? "bg-orange-300 text-gray-800 font-semibold" :
+                "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                {idx === 0 && "🥇"}
+                {idx === 1 && "🥈"} 
+                {idx === 2 && "🥉"}
+                {idx > 2 && `${idx + 1}.`}
+                {p.nickname}
+              </span>
+              <span className="text-2xl font-bold">
+                {p.totalScore || 0} pts
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="text-center text-gray-600 dark:text-gray-400">
+          <p>Nenhum dado de ranking disponível</p>
+        </div>
+      )}
+      
+      <div className="text-center mt-8 space-y-4">
+        {isAdmin && (
+          <button
+            onClick={handleNewRound}
+            className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold shadow-md transition-colors mr-4"
+          >
+            🔄 Novo Jogo
+          </button>
+        )}
+        <button
+          onClick={handleLeaveRoom}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold shadow-md transition-colors"
+        >
+          🏠 Voltar ao Lobby
+        </button>
+      </div>
+    </section>
+  );
+
+  // ✅ Render principal
   return (
-    <div className="container mx-auto px-4 py-4 flex flex-col space-y-6">
-      {/* Letter Display */}
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
       {letter && roundStarted && !roundEnded && (
         <div className="text-3xl text-center font-bold text-blue-700 mb-4 select-none dark:text-blue-400">
           Letra da rodada: <span className="text-5xl">{letter}</span>
         </div>
       )}
 
-      {/* Mostrar ranking final se existir */}
       {finalRanking ? (
         <FinalRanking />
       ) : (
         <>
           {/* Theme Management */}
           {isAdmin && !roundStarted && !roundEnded && !finalRanking && (
-            <section className="bg-gray-50 p-4 rounded border dark:bg-gray-700 dark:border-gray-600">
-              <h3 className="text-xl font-semibold mb-3 text-gray-700 dark:text-gray-100">
-                🎯 Gerenciar Temas
-              </h3>
+            <section className="bg-gray-50 p-4 rounded border dark:bg-gray-700 dark:border-gray-600 mb-6">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-xl font-semibold text-gray-700 dark:text-gray-100">
+                  🎯 Gerenciar Temas
+                </h3>
+                
+                {/* Status da Sala */}
+                <div className="flex items-center gap-2">
+                  {isSaved && !hasUnsavedChanges ? (
+                    <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium dark:bg-green-800 dark:text-green-100">
+                      💾 Sala Salva
+                    </span>
+                  ) : (
+                    <button
+                      onClick={handleSaveRoomConfig}
+                      className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg shadow transition font-medium"
+                    >
+                      💾 Salvar Sala
+                    </button>
+                  )}
+                  
+                  {/* Indicador de mudanças não salvas */}
+                  {hasUnsavedChanges && (
+                    <span className="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-medium dark:bg-orange-800 dark:text-orange-100">
+                      ⚠️ Alterações não salvas
+                    </span>
+                  )}
+                </div>
+              </div>
+
               <div className="flex flex-col sm:flex-row gap-2 mb-3">
                 <input
                   type="text"
@@ -776,47 +836,9 @@ export default function GameBoard({
         </>
       )}
 
-      {/* Ranking Final */}
       {finalRanking && <FinalRanking />}
     </div>
   );
-}
+};
 
-socket.on('new_round', async ({ room }) => {
-    try {
-        console.log(`[Socket.io] Starting new round for room ${room}`);
-        
-        const config = roomConfigs[room];
-        if (!config) {
-            console.log(`[Socket.io] No config found for room ${room}`);
-            return;
-        }
-
-        // CORREÇÃO: Limpar respostas antigas do gameState
-        if (gameState.has(room)) {
-            const roomState = gameState.get(room);
-            roomState.answers.clear(); // CORREÇÃO: Limpar respostas
-            roomState.currentValidation = null;
-            roomState.playerScores = roomState.playerScores || new Map(); // Manter scores totais
-            console.log(`[Socket.io] Cleared previous answers for room ${room}`);
-        } else {
-            initializeRoomState(room);
-        }
-
-        // Reset room config for new round
-        config.roundActive = false;
-        config.roundEnded = false;
-        config.stopClickedByMe = null;
-        config.currentLetter = null;
-
-        await saveRoomConfigToFirestore(room, config);
-
-        // Emitir evento de nova rodada
-        io.to(room).emit("new_round_started");
-        emitRoomConfig(room, config);
-        
-        console.log(`[Socket.io] New round initiated for room ${room}`);
-    } catch (error) {
-        console.error('[Socket.io] Error in new_round:', error);
-    }
-});
+export default GameBoard;

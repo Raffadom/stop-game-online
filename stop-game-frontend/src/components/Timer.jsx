@@ -17,14 +17,16 @@ export default function Timer({ duration, room, onTimeUp }) {
       interval = setInterval(() => {
         setTimeLeft((prevTime) => {
           if (prevTime <= 1) {
-            // CORREÇÃO: Verificar se onTimeUp existe antes de chamar
+            console.log('[Timer] ⏰ Tempo esgotado! Notificando servidor...');
+            
+            // ✅ Notificar servidor que tempo se esgotou
+            socket.emit('time_up', { room });
+            
+            // ✅ Chamar callback se existir
             if (typeof onTimeUp === 'function') {
               onTimeUp();
-            } else {
-              // FALLBACK: Emitir time_up diretamente via socket
-              console.log('[Timer] onTimeUp não disponível, emitindo time_up via socket');
-              socket.emit('time_up', { room });
             }
+            
             setIsActive(false);
             return 0;
           }

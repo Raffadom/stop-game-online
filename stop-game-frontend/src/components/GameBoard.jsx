@@ -394,14 +394,24 @@ function GameBoard({
     };
 
     const handleStartValidation = (data) => {
-      console.log('[GameBoard] Validation started:', data);
-      setValidationData(data);
-      setShowModal(true);
-      setCanReveal(false);
-      setRevealed(false);
-      setIsRevealing(false);
-      setCurrentValidated(false);
-    };
+    console.log('[GameBoard] 🔍 === INICIANDO VALIDAÇÃO ===');
+    console.log('[GameBoard] 📦 Dados recebidos:', data);
+    console.log('[GameBoard] 👤 Jogador:', data.playerNickname);
+    console.log('[GameBoard] 📋 Tema:', data.theme);
+    console.log('[GameBoard] 💭 Resposta:', data.answer);
+    console.log('[GameBoard] 📊 Item:', data.currentIndex, '/', data.totalItems);
+    
+    // ✅ SEMPRE mostrar modal para validação, inclusive para respostas vazias
+    console.log('[GameBoard] ✅ Mostrando modal de validação (resposta vazia ou preenchida)');
+    setValidationData(data);
+    setShowModal(true);
+    setCanReveal(true);
+    setRevealed(false);
+    setIsRevealing(false);
+    setCurrentValidated(false);
+    
+    console.log('[GameBoard] ✅ Modal de validação deve aparecer agora!');
+  };
 
     const handleReveal = (data) => {
       console.log('[GameBoard] Answer revealed:', data);
@@ -425,33 +435,69 @@ function GameBoard({
     };
 
     const handleValidationCompleteForPlayer = (data) => {
-      console.log('[GameBoard] Validation complete for player:', data);
+      console.log('[GameBoard] 🏁 === VALIDAÇÃO COMPLETA PARA JOGADOR ===');
+      console.log('[GameBoard] 📊 Dados recebidos:', data);
       
       if (data.myAnswers && Array.isArray(data.myAnswers)) {
+        // ✅ ADICIONAR: Log específico para detectar respostas duplicadas incorretas
+        console.log('[GameBoard] 🎯 === ANÁLISE DE PONTUAÇÃO ===');
+        data.myAnswers.forEach(answer => {
+          console.log(`[GameBoard] 📝 ${answer.theme}: "${answer.answer}" = ${answer.points} pontos`);
+          
+          // ✅ VERIFICAR problemas específicos de duplicatas
+          if (answer.answer && answer.answer.trim() && answer.points === 100) {
+            console.log(`[GameBoard] ⚠️ POSSÍVEL ERRO: "${answer.answer}" recebeu 100 pontos`);
+            console.log(`[GameBoard] ❓ Verificar se "${answer.answer}" é realmente única ou se deveria ser 50 pontos!`);
+          }
+          if (answer.points === 50) {
+            console.log(`[GameBoard] ✅ CORRETO: "${answer.answer}" recebeu 50 pontos (resposta repetida detectada)`);
+          }
+          if (!answer.answer || !answer.answer.trim()) {
+            console.log(`[GameBoard] ✅ CORRETO: Resposta vazia recebeu ${answer.points} pontos`);
+          }
+        });
+        
+        // ✅ LOG ESPECÍFICO para o caso "zurique"
+        const zuriqueAnswer = data.myAnswers.find(a => a.answer && a.answer.toLowerCase().includes('zurique'));
+        if (zuriqueAnswer && zuriqueAnswer.points === 100) {
+          console.log(`[GameBoard] 🚨 ERRO CONFIRMADO: "zurique" recebeu 100 pontos mas ambos jogadores responderam igual!`);
+          console.log(`[GameBoard] 🚨 DEVERIA SER: 50 pontos para cada jogador!`);
+        }
+        
         setAnswers(prevAnswers => {
-          return prevAnswers.map(answer => {
+          const updatedAnswers = prevAnswers.map(answer => {
             const validatedAnswer = data.myAnswers.find(va => va.theme === answer.theme);
             if (validatedAnswer) {
+              console.log(`[GameBoard] 🎯 ${answer.theme}: ${validatedAnswer.answer} = ${validatedAnswer.points} pontos`);
               return {
                 ...answer,
                 points: validatedAnswer.points,
-                reason: validatedAnswer.reason,
+                reason: validatedAnswer.reason || "",
                 validated: true
               };
             }
             return answer;
           });
+          
+          console.log('[GameBoard] 📊 Respostas atualizadas:', updatedAnswers);
+          return updatedAnswers;
         });
       }
       
       if (typeof data.myScore === 'number') {
+        console.log('[GameBoard] 🎯 Pontuação da rodada:', data.myScore);
         setRoundScore(data.myScore);
         setShowRoundResult(true);
       }
       
       if (typeof data.myTotalScore === 'number') {
+        console.log('[GameBoard] 🏆 Pontuação total:', data.myTotalScore);
         setTotalPoints(data.myTotalScore);
       }
+      
+      // ✅ Fechar modal se estiver aberta
+      setShowModal(false);
+      setValidationData(null);
     };
 
     const handleGameEnded = (ranking) => {
@@ -511,72 +557,130 @@ function GameBoard({
     }
   }, [room]); // ✅ Executar apenas quando 'room' mudar
 
-  // ...existing code do resto do componente
-
   // ✅ Componentes
   const ValidationModal = () => {
     if (!validationData) return null;
 
+    const isEmptyAnswer = !validationData.answer || validationData.answer.trim() === '';
+
     return (
       <Modal onClose={() => setShowModal(false)} showClose={false}>
-        <div className="bg-white p-6 rounded-xl dark:bg-gray-800 dark:text-gray-100 space-y-6">
+        <div className="bg-white p-6 rounded-xl dark:bg-gray-800 dark:text-gray-100 space-y-6 max-w-lg mx-auto">
           <h4 className="text-2xl text-center font-bold text-blue-700 dark:text-blue-400">
             🔍 Validando Resposta
           </h4>
           
-          <div className="text-center space-y-2">
-            <div className="text-lg font-semibold">
-              👤 Jogador: <span className="text-blue-600">{validationData.playerNickname}</span>
-            </div>
-            <div className="text-lg font-semibold">
-              📋 Tema: <span className="text-purple-600">{validationData.theme}</span>
+          <div className="text-center space-y-3">
+            <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg space-y-2">
+              <div className="text-lg font-semibold">
+                👤 Jogador: <span className="text-blue-600 dark:text-blue-400">{validationData.playerNickname}</span>
+              </div>
+              <div className="text-lg font-semibold">
+                📋 Tema: <span className="text-purple-600 dark:text-purple-400">{validationData.theme}</span>
+              </div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                📊 Progresso: {validationData.currentIndex}/{validationData.totalItems}
+              </div>
             </div>
           </div>
 
           {revealed ? (
             <>
-              <div className="text-center text-2xl font-bold text-gray-900 dark:text-gray-50 p-4 bg-gray-100 dark:bg-gray-700 rounded">
-                💭 Resposta: <span className="text-blue-600">
-                  {validationData.answer || "(Sem resposta)"}
-                </span>
+              <div className="text-center">
+                <div className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  💭 Resposta do jogador:
+                </div>
+                
+                {/* ✅ Mostrar resposta vazia de forma clara */}
+                <div className={`text-2xl font-bold p-4 rounded-lg border-2 ${
+                  isEmptyAnswer 
+                    ? 'bg-red-50 dark:bg-red-900 text-red-800 dark:text-red-200 border-red-300 dark:border-red-600'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-50 border-gray-300 dark:border-gray-600'
+                }`}>
+                  {isEmptyAnswer ? "❌ RESPOSTA VAZIA" : validationData.answer}
+                </div>
+                
+                {/* ✅ Mensagem especial para respostas vazias */}
+                {isEmptyAnswer && (
+                  <div className="mt-3 p-3 bg-orange-100 dark:bg-orange-900 border border-orange-300 dark:border-orange-600 rounded-lg">
+                    <p className="text-orange-800 dark:text-orange-200 font-semibold">
+                      ⚠️ Este jogador não respondeu a este tema
+                    </p>
+                    <p className="text-orange-700 dark:text-orange-300 text-sm">
+                      Respostas vazias sempre valem 0 pontos
+                    </p>
+                  </div>
+                )}
               </div>
               
               {canReveal && !isValidating && !currentValidated && (
-                <div className="flex justify-center space-x-4 mt-6">
-                  <button
-                    className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg shadow-md font-semibold transition-colors"
-                    onClick={() => handleValidate(true)}
-                  >
-                    ✅ Confirmar como Correta
-                  </button>
-                  <button
-                    className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg shadow-md font-semibold transition-colors"
-                    onClick={() => handleValidate(false)}
-                  >
-                    ❌ Confirmar como Incorreta
-                  </button>
-                </div>
+                <>
+                  <div className="text-center text-gray-600 dark:text-gray-400 text-sm mb-4">
+                    {isEmptyAnswer ? (
+                      <span className="text-red-600 dark:text-red-400 font-semibold">
+                        ⚖️ Resposta vazia = 0 pontos (clique em Rejeitar)
+                      </span>
+                    ) : (
+                      <span>
+                        ⚖️ Esta resposta está correta para o tema <strong>{validationData.theme}</strong>?
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="flex justify-center space-x-4">
+                    <button
+                      className={`px-6 py-3 rounded-lg shadow-md font-semibold transition-colors flex items-center gap-2 ${
+                        isEmptyAnswer 
+                          ? 'bg-gray-400 text-gray-600 cursor-not-allowed opacity-50' 
+                          : 'bg-green-600 hover:bg-green-700 text-white'
+                      }`}
+                      onClick={() => handleValidate(true)}
+                      disabled={isEmptyAnswer}
+                    >
+                      ✅ Aceitar {isEmptyAnswer ? '(Indisponível)' : '(100/50 pts)'}
+                    </button>
+                    <button
+                      className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg shadow-md font-semibold transition-colors flex items-center gap-2"
+                      onClick={() => handleValidate(false)}
+                    >
+                      ❌ Rejeitar (0 pts)
+                    </button>
+                  </div>
+                  
+                  <div className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                    💡 100 pts = resposta única válida | 50 pts = resposta repetida válida | 0 pts = incorreta/vazia
+                  </div>
+                </>
               )}
               
               {(isValidating || currentValidated) && (
-                <div className="text-center text-gray-600 dark:text-gray-400">
+                <div className="text-center text-gray-600 dark:text-gray-400 py-4">
+                  <div className="animate-spin inline-block w-6 h-6 border-4 border-current border-t-transparent rounded-full mr-2"></div>
                   ⏳ Processando validação...
                 </div>
               )}
             </>
           ) : (
-            <div className="text-center mt-6">
+            <div className="text-center space-y-4">
               {canReveal && !isRevealing ? (
-                <button
-                  onClick={handleRevealAnswer}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg shadow-md font-semibold transition-colors"
-                >
-                  👁️ Mostrar Resposta
-                </button>
+                <>
+                  <p className="text-gray-700 dark:text-gray-300 text-lg mb-4">
+                    👁️ Clique para revelar a resposta e validá-la:
+                  </p>
+                  <button
+                    onClick={handleRevealAnswer}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg shadow-md font-semibold transition-colors"
+                  >
+                    👁️ Mostrar Resposta
+                  </button>
+                </>
               ) : (
-                <p className="text-gray-700 dark:text-gray-300 text-lg">
-                  {isRevealing ? "⏳ Revelando..." : "⏱️ Aguardando o juiz revelar a resposta..."}
-                </p>
+                <div className="py-8">
+                  <div className="animate-spin inline-block w-8 h-8 border-4 border-current border-t-transparent rounded-full mr-2"></div>
+                  <p className="text-gray-700 dark:text-gray-300 text-lg">
+                    {isRevealing ? "⏳ Revelando resposta..." : "⏱️ Aguardando revelação..."}
+                  </p>
+                </div>
               )}
             </div>
           )}
@@ -741,17 +845,38 @@ function GameBoard({
                     type="text"
                     disabled={!roundStarted || roundEnded}
                     placeholder="Sua resposta"
-                    className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-600 dark:text-gray-50 disabled:bg-gray-200 dark:disabled:bg-gray-600"
-                    value={a.answer}
+                    className={`w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-600 dark:text-gray-50 disabled:bg-gray-200 dark:disabled:bg-gray-600 ${
+                      a.points !== null && a.points === 0 ? 'border-red-300 bg-red-50 dark:border-red-600 dark:bg-red-900' :
+                      a.points !== null && a.points === 50 ? 'border-orange-300 bg-orange-50 dark:border-orange-600 dark:bg-orange-900' :
+                      a.points !== null && a.points === 100 ? 'border-green-300 bg-green-50 dark:border-green-600 dark:bg-green-900' :
+                      ''
+                    }`}
+                    value={a.answer || ""} 
                     onChange={(e) => handleAnswerChange(i, e.target.value)}
                   />
                   {a.points !== null && (
-                    <div className={`text-right font-semibold mt-1 ${
-                      a.points === 100 ? 'text-green-600' :        
-                      a.points === 50 ? 'text-orange-500' :        
-                      'text-red-600'                               
-                    }`}>
-                      {a.points} pontos
+                    <div className="mt-2 space-y-1">
+                      <div className={`text-right font-bold ${
+                        a.points === 100 ? 'text-green-600' :        
+                        a.points === 50 ? 'text-orange-500' :        
+                        'text-red-600'                               
+                      }`}>
+                        {a.points} pontos
+                      </div>
+                      
+                      {/* ✅ Mostrar explicação da pontuação */}
+                      <div className="text-xs text-right text-gray-600 dark:text-gray-400">
+                        {a.points === 100 && '🟢 Resposta única válida'}
+                        {a.points === 50 && '🟡 Resposta repetida válida'} 
+                        {a.points === 0 && '🔴 Resposta incorreta/vazia'}
+                      </div>
+                      
+                      {/* ✅ Mostrar motivo se houver */}
+                      {a.reason && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400 italic">
+                          "{a.reason}"
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -842,3 +967,29 @@ function GameBoard({
 };
 
 export default GameBoard;
+
+// EXEMPLO da lógica correta que deveria estar no backend
+const calculatePoints = (allAnswers, theme) => {
+  const answersForTheme = allAnswers
+    .map(playerAnswers => playerAnswers.find(a => a.theme === theme))
+    .filter(answer => answer && answer.answer.trim() && answer.valid);
+
+  // Contar quantas vezes cada resposta aparece
+  const answerCounts = {};
+  answersForTheme.forEach(answer => {
+    const normalizedAnswer = answer.answer.toLowerCase().trim();
+    answerCounts[normalizedAnswer] = (answerCounts[normalizedAnswer] || 0) + 1;
+  });
+
+  // Aplicar pontuação
+  answersForTheme.forEach(answer => {
+    const normalizedAnswer = answer.answer.toLowerCase().trim();
+    const count = answerCounts[normalizedAnswer];
+    
+    if (count === 1) {
+      answer.points = 100; // Resposta única
+    } else {
+      answer.points = 50;  // Resposta repetida
+    }
+  });
+};

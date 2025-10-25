@@ -698,30 +698,27 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            const adminPlayer = Object.values(config.players).find(p => p.isCreator);
-            if (!adminPlayer) {
-                console.log(`[Socket.io] No admin found in room ${room}`);
-                return;
-            }
+            // ✅ CORREÇÃO: Quem clica STOP é o validador (não o admin)
+            const validatorId = socket.userId; // ✅ Quem clicou STOP será o validador
 
             config.roundActive = false;
             config.roundEnded = true;
             config.stopClickedByMe = socket.userId;
 
-            // ✅ CORREÇÃO: Usar o mesmo validatorId que o sistema de time_up
-            const validatorId = adminPlayer.userId;
+            console.log(`[Socket.io] 🎯 Validador definido após STOP: ${validatorId} (quem clicou STOP)`);
 
-            console.log(`[Socket.io] 🎯 Validador definido após STOP: ${validatorId} (Admin)`);
+            // ✅ Emitir evento de rodada finalizada (igual ao time_up)
+            io.to(room).emit('time_up_round_ended', { validatorId }); // ✅ Usar o mesmo evento
 
-            io.to(room).emit("round_ended", { validatorId });
+            console.log(`[Socket.io] ✅ Evento 'time_up_round_ended' enviado para sala ${room}`);
             emitRoomConfig(room, config);
 
-            console.log(`[Socket.io] Round ended for room ${room}, admin ${adminPlayer.nickname} is validator`);
+            console.log(`[Socket.io] Round ended for room ${room}, ${socket.nickname} is validator`);
 
             // ✅ CORREÇÃO: Usar startValidationProcess (igual ao time_up)
             setTimeout(() => {
                 console.log(`[Socket.io] 🔄 Iniciando validação após STOP na sala ${room}...`);
-                startValidationProcess(room, validatorId); // ✅ USAR O MESMO SISTEMA
+                startValidationProcess(room, validatorId); // ✅ USAR O MESMO SISTEMA DO TIME_UP
             }, 2000);
 
         } catch (error) {

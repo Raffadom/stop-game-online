@@ -41,6 +41,11 @@ function GameBoard({
   const [finalRanking, setFinalRanking] = useState(null);
   const [answersSubmitted, setAnswersSubmitted] = useState(false);
   
+  // ✅ Estados para gerenciar sala
+  const [duration, setDuration] = useState(60);
+  const [isSaved, setIsSaved] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  
   const maxThemes = 20;
 
   // Temas padrão
@@ -90,11 +95,17 @@ function GameBoard({
 
   // ✅ Função para revelar resposta
   const handleRevealAnswer = useCallback(() => {
-    if (!canReveal || isRevealing) return;
+    console.log('[GameBoard] 🔍 Revelando resposta...', { canReveal, isRevealing, room });
+    
+    if (isRevealing) {
+      console.log('[GameBoard] ❌ Já está revelando - ignorando');
+      return;
+    }
     
     setIsRevealing(true);
+    console.log('[GameBoard] 📤 Emitindo reveal_answer para sala:', room);
     socket.emit("reveal_answer", { room });
-  }, [canReveal, isRevealing, room]);
+  }, [isRevealing, room]);
 
   // ✅ Funções de gerenciamento de sala
   const handleNewRound = useCallback(() => {
@@ -108,6 +119,7 @@ function GameBoard({
     setRoundScore(null);
     
     if (roomThemes && roomThemes.length > 0) {
+      // ✅ CORRIGIR: Adicionar parênteses na função map
       setAnswers(roomThemes.map(theme => ({ 
         theme, 
         answer: "", 
@@ -142,11 +154,6 @@ function GameBoard({
     }, 100);
   }, []);
 
-  // ✅ Estados para gerenciar sala (mover para cima, antes dos handlers duplicados)
-  const [duration, setDuration] = useState(60);
-  const [isSaved, setIsSaved] = useState(false);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-
   // ✅ Função para salvar sala
   const handleSaveRoomConfig = useCallback(() => {
     if (!room || !isAdmin) {
@@ -157,25 +164,25 @@ function GameBoard({
     console.log('[GameBoard] Salvando configuração da sala...', {
       room,
       themes: roomThemes,
-      duration: roomDuration || duration // ✅ Usar roomDuration se disponível
+      duration: roomDuration || duration
     });
     
     socket.emit("save_room", { 
       room, 
       roomName: room,
-      duration: roomDuration || duration // ✅ Incluir duração no salvamento
+      duration: roomDuration || duration
     });
   }, [room, isAdmin, roomThemes, roomDuration, duration]);
 
-  // ✅ Funções de gerenciamento de temas (corrigir para marcar como alterado)
+  // ✅ Funções de gerenciamento de temas
   const handleAddTheme = useCallback(() => {
     if (!newTheme.trim() || !roomThemes || roomThemes.includes(newTheme.trim())) return;
     
     const updatedThemes = [...roomThemes, newTheme.trim()];
     if (setRoomThemes) setRoomThemes(updatedThemes);
     setNewTheme("");
-    setHasUnsavedChanges(true); // ✅ Marcar como alterado
-    setIsSaved(false); // ✅ Não está mais salva
+    setHasUnsavedChanges(true);
+    setIsSaved(false);
     
     socket.emit("update_themes", { room, themes: updatedThemes });
   }, [newTheme, roomThemes, setRoomThemes, room]);
@@ -184,8 +191,8 @@ function GameBoard({
     if (!roomThemes) return;
     const updatedThemes = roomThemes.filter((_, i) => i !== index);
     if (setRoomThemes) setRoomThemes(updatedThemes);
-    setHasUnsavedChanges(true); // ✅ Marcar como alterado
-    setIsSaved(false); // ✅ Não está mais salva
+    setHasUnsavedChanges(true);
+    setIsSaved(false);
     
     socket.emit("update_themes", { room, themes: updatedThemes });
   }, [roomThemes, setRoomThemes, room]);
@@ -196,7 +203,7 @@ function GameBoard({
     setAnswers(newAnswers);
   }, [answers]);
 
-  // ✅ Adicionar função handleValidate que está faltando
+  // ✅ Função handleValidate
   const handleValidate = useCallback((isValid) => {
     if (!canReveal || !validationData || isValidating || currentValidated) {
       console.log('[GameBoard] Validation blocked:', { canReveal, validationData: !!validationData, isValidating, currentValidated });
@@ -209,11 +216,70 @@ function GameBoard({
     socket.emit("validate_answer", { valid: isValid, room });
   }, [canReveal, validationData, isValidating, room, currentValidated]);
 
-  // ✅ CORRIGIR: Inicializar respostas quando temas mudarem
+  // ✅ Função handleValidateAnswer
+  const handleValidateAnswer = useCallback((isValid) => {
+    if (!validationData || !validationData.isValidator) {
+      console.log('[GameBoard] Não é o validador - ignorando');
+      return;
+    }
+
+    console.log('[GameBoard] Validando resposta:', isValid, 'para:', validationData.answer);
+    socket.emit("validate_answer", { valid: isValid, room });
+  }, [validationData, room]);
+
+  // ✅ Handlers de callback
+  const handleValidationCompleteForPlayer = useCallback((data) => {
+    console.log('[GameBoard] ✅ Validação individual completa:', data);
+    
+    if (data.myAnswers && Array.isArray(data.myAnswers)) {
+      console.log('[GameBoard] 📋 Atualizando respostas com pontuações:', data.myAnswers);
+      
+      setAnswers(prevAnswers => {
+        return prevAnswers.map(answer => {
+          const validatedAnswer = data.myAnswers.find(va => va.theme === answer.theme);
+          if (validatedAnswer) {
+            return {
+              ...answer,
+              points: validatedAnswer.points,
+              reason: validatedAnswer.reason,
+              validated: true
+            };
+          }
+          return answer;
+        });
+      });
+    }
+    
+    if (typeof data.myScore === 'number') {
+      setRoundScore(data.myScore);
+      setShowRoundResult(true);
+    }
+
+    if (typeof data.myTotalScore === 'number') {
+      setTotalPoints(data.myTotalScore);
+    }
+  }, []);
+
+  const handleGameEnded = useCallback((data) => {
+    console.log('[GameBoard] 🏁 Jogo finalizado:', data);
+    
+    if (data.finalRanking && Array.isArray(data.finalRanking)) {
+      setFinalRanking(data.finalRanking);
+      setShowRoundResult(false); 
+      setRoundScore(null);
+    }
+  }, []);
+
+  const handleNoAnswersToValidate = useCallback(() => {
+    console.log('[GameBoard] ❌ Nenhuma resposta para validar');
+    setShowModal(false);
+    setValidationData(null);
+  }, []);
+
+  // ✅ useEffect para inicializar respostas
   useEffect(() => {
     if (roomThemes && roomThemes.length > 0) {
       console.log('[GameBoard] Atualizando respostas com temas:', roomThemes);
-      // ✅ SEMPRE atualizar quando temas mudarem, não só quando answers.length === 0
       setAnswers(roomThemes.map(theme => ({ 
         theme, 
         answer: "", 
@@ -222,23 +288,20 @@ function GameBoard({
         validated: false 
       })));
     }
-  }, [roomThemes]); // ✅ REMOVER answers.length da dependência
+  }, [roomThemes]);
 
-  // ✅ CORRIGIR: Preservar respostas quando temas são atualizados
+  // ✅ useEffect para preservar respostas
   useEffect(() => {
     if (roomThemes && roomThemes.length > 0 && answers.length > 0) {
       console.log('[GameBoard] Preservando respostas existentes ao atualizar temas');
       
       setAnswers(prevAnswers => {
         const newAnswers = roomThemes.map(theme => {
-          // ✅ Procurar resposta existente para este tema
           const existingAnswer = prevAnswers.find(a => a.theme === theme);
           
           if (existingAnswer) {
-            // ✅ Manter resposta existente
             return existingAnswer;
           } else {
-            // ✅ Criar nova resposta vazia para tema novo
             return {
               theme,
               answer: "",
@@ -254,17 +317,17 @@ function GameBoard({
     }
   }, [roomThemes, answers.length]);
 
-  // ✅ ADICIONAR: Escutar mudanças na duração do roomDuration (props)
+  // ✅ useEffect para duração
   useEffect(() => {
     if (typeof roomDuration === 'number' && roomDuration !== duration) {
       console.log('[GameBoard] Duração alterada pelo Timer:', roomDuration);
       setDuration(roomDuration);
-      setHasUnsavedChanges(true); // ✅ Marcar como alterado
-      setIsSaved(false); // ✅ Não está mais salva
+      setHasUnsavedChanges(true);
+      setIsSaved(false);
     }
   }, [roomDuration, duration]);
 
-  // ✅ Socket listeners existente...
+  // ✅ Socket listeners
   useEffect(() => {
     console.log('[GameBoard] Configurando event listeners');
 
@@ -276,14 +339,12 @@ function GameBoard({
         setRoomThemes(config.themes);
       }
       
-      // ✅ Atualizar duração
       if (typeof config.duration === 'number') {
         setDuration(config.duration);
       }
       
-      // ✅ Atualizar status de salva
       setIsSaved(config.isSaved || false);
-      setHasUnsavedChanges(false); // ✅ Resetar mudanças não salvas
+      setHasUnsavedChanges(false);
     };
 
     const handleThemesUpdated = ({ themes: newThemes }) => {
@@ -291,19 +352,15 @@ function GameBoard({
       if (setRoomThemes) {
         setRoomThemes(newThemes);
       }
-      setHasUnsavedChanges(true); // ✅ Marcar como alterado
-      setIsSaved(false); // ✅ Não está mais salva
+      setHasUnsavedChanges(true);
+      setIsSaved(false);
     };
 
-    // ✅ Handler para quando sala é salva
     const handleRoomSaved = () => {
       console.log('[GameBoard] Sala salva com sucesso!');
       setIsSaved(true);
       setHasUnsavedChanges(false);
     };
-
-    // ✅ REMOVER handleDurationUpdated - não precisamos mais
-    // A duração é controlada pelo Timer component
 
     const handleRoundStarted = (data) => {
       console.log('[GameBoard] Rodada iniciada com letra:', data.letter);
@@ -315,7 +372,6 @@ function GameBoard({
       setRoundScore(0);
       setAnswersSubmitted(false);
       
-      // ✅ Usar callback para evitar dependência de roomThemes
       setAnswers(prevAnswers => {
         if (roomThemes && roomThemes.length > 0) {
           console.log('[GameBoard] Resetando respostas para nova rodada');
@@ -340,7 +396,6 @@ function GameBoard({
     const handleTimeUpRoundEnded = () => {
       console.log('[GameBoard] ⏰ Tempo esgotado - rodada finalizada');
       
-      // ✅ Usar callback para evitar dependência
       setAnswers(prevAnswers => {
         if (prevAnswers.length > 0 && !answersSubmitted) {
           console.log('[GameBoard] ⏰ Enviando respostas devido ao tempo esgotado');
@@ -363,9 +418,8 @@ function GameBoard({
     };
 
     const handleNewRoundStarted = () => {
-      console.log('[GameBoard] Nova rodada iniciada - resetando estados');
+      console.log('[GameBoard] 🔄 Nova rodada iniciada - resetando estados');
       
-      // ✅ Usar callback para evitar dependência
       setAnswers(prevAnswers => {
         if (roomThemes && roomThemes.length > 0) {
           console.log('[GameBoard] Resetando respostas para temas:', roomThemes);
@@ -393,357 +447,114 @@ function GameBoard({
       setCurrentValidated(false);
     };
 
-    const handleStartValidation = (data) => {
-    console.log('[GameBoard] 🔍 === INICIANDO VALIDAÇÃO ===');
-    console.log('[GameBoard] 📦 Dados recebidos:', data);
-    console.log('[GameBoard] 👤 Jogador:', data.playerNickname);
-    console.log('[GameBoard] 📋 Tema:', data.theme);
-    console.log('[GameBoard] 💭 Resposta:', data.answer);
-    console.log('[GameBoard] 📊 Item:', data.currentIndex, '/', data.totalItems);
-    
-    // ✅ SEMPRE mostrar modal para validação, inclusive para respostas vazias
-    console.log('[GameBoard] ✅ Mostrando modal de validação (resposta vazia ou preenchida)');
-    setValidationData(data);
-    setShowModal(true);
-    setCanReveal(true);
-    setRevealed(false);
-    setIsRevealing(false);
-    setCurrentValidated(false);
-    
-    console.log('[GameBoard] ✅ Modal de validação deve aparecer agora!');
-  };
-
-    const handleReveal = (data) => {
-      console.log('[GameBoard] Answer revealed:', data);
-      setRevealed(true);
-      setCanReveal(true);
-      setIsRevealing(false);
+    const handleValidationStart = (data) => {
+      console.log('[GameBoard] 🔍 Recebido start_validation:', data);
+      console.log('[GameBoard] 🎯 Meu socket.userId:', socket.userId);
+      console.log('[GameBoard] 🎯 Meu userId (props):', userId);
+      console.log('[GameBoard] 🎯 ValidatorId recebido:', data.validatorId);
+      
+      const myUserId = socket.userId || userId;
+      console.log('[GameBoard] 🎯 UserId final usado:', myUserId);
+      console.log('[GameBoard] 🎯 Sou o validador?', myUserId === data.validatorId);
+      
+      setValidationData({
+        ...data,
+        isValidator: myUserId === data.validatorId,
+        myUserId: myUserId
+      });
+      setShowModal(true);
     };
 
     const handleAnswerValidated = (data) => {
-      console.log('[GameBoard] Answer validated:', data);
-      setIsValidating(false);
-      setCurrentValidated(false);
+      console.log('[GameBoard] ✅ Resposta validada para todos:', data);
+      
+      setValidationData(prevData => ({
+        ...prevData,
+        showResult: true,
+        resultData: {
+          valid: data.valid,
+          playerNickname: data.playerNickname,
+          answer: data.answer,
+          theme: data.theme
+        }
+      }));
+
+      setTimeout(() => {
+        setValidationData(prevData => ({
+          ...prevData,
+          showResult: false,
+          resultData: null
+        }));
+      }, 2000);
     };
 
     const handleValidationComplete = (data) => {
-      console.log('[GameBoard] Validation complete:', data);
+      console.log('[GameBoard] 🏁 Validação completa:', data);
+      
       setShowModal(false);
       setValidationData(null);
-      setCanReveal(false);
-      setRevealed(false);
-    };
-
-    const handleValidationCompleteForPlayer = (data) => {
-      console.log('[GameBoard] 🏁 === VALIDAÇÃO COMPLETA PARA JOGADOR ===');
-      console.log('[GameBoard] 📊 Dados recebidos:', data);
       
-      if (data.myAnswers && Array.isArray(data.myAnswers)) {
-        // ✅ ADICIONAR: Log específico para detectar respostas duplicadas incorretas
-        console.log('[GameBoard] 🎯 === ANÁLISE DE PONTUAÇÃO ===');
-        data.myAnswers.forEach(answer => {
-          console.log(`[GameBoard] 📝 ${answer.theme}: "${answer.answer}" = ${answer.points} pontos`);
-          
-          // ✅ VERIFICAR problemas específicos de duplicatas
-          if (answer.answer && answer.answer.trim() && answer.points === 100) {
-            console.log(`[GameBoard] ⚠️ POSSÍVEL ERRO: "${answer.answer}" recebeu 100 pontos`);
-            console.log(`[GameBoard] ❓ Verificar se "${answer.answer}" é realmente única ou se deveria ser 50 pontos!`);
-          }
-          if (answer.points === 50) {
-            console.log(`[GameBoard] ✅ CORRETO: "${answer.answer}" recebeu 50 pontos (resposta repetida detectada)`);
-          }
-          if (!answer.answer || !answer.answer.trim()) {
-            console.log(`[GameBoard] ✅ CORRETO: Resposta vazia recebeu ${answer.points} pontos`);
-          }
-        });
-        
-        // ✅ LOG ESPECÍFICO para o caso "zurique"
-        const zuriqueAnswer = data.myAnswers.find(a => a.answer && a.answer.toLowerCase().includes('zurique'));
-        if (zuriqueAnswer && zuriqueAnswer.points === 100) {
-          console.log(`[GameBoard] 🚨 ERRO CONFIRMADO: "zurique" recebeu 100 pontos mas ambos jogadores responderam igual!`);
-          console.log(`[GameBoard] 🚨 DEVERIA SER: 50 pontos para cada jogador!`);
-        }
-        
-        setAnswers(prevAnswers => {
-          const updatedAnswers = prevAnswers.map(answer => {
-            const validatedAnswer = data.myAnswers.find(va => va.theme === answer.theme);
-            if (validatedAnswer) {
-              console.log(`[GameBoard] 🎯 ${answer.theme}: ${validatedAnswer.answer} = ${validatedAnswer.points} pontos`);
-              return {
-                ...answer,
-                points: validatedAnswer.points,
-                reason: validatedAnswer.reason || "",
-                validated: true
-              };
-            }
-            return answer;
-          });
-          
-          console.log('[GameBoard] 📊 Respostas atualizadas:', updatedAnswers);
-          return updatedAnswers;
-        });
+      if (data.allAnswers) {
+        console.log('[GameBoard] 📝 Mantendo respostas visíveis após validação');
       }
+    };
+
+    const handleReveal = (data) => {
+      console.log('[GameBoard] 👁️ Resposta revelada:', data);
+      setRevealed(true);
+      setIsRevealing(false);
       
-      if (typeof data.myScore === 'number') {
-        console.log('[GameBoard] 🎯 Pontuação da rodada:', data.myScore);
-        setRoundScore(data.myScore);
-        setShowRoundResult(true);
+      if (validationData) {
+        setValidationData(prevData => ({
+          ...prevData,
+          isRevealed: true,
+          revealedData: data
+        }));
       }
-      
-      if (typeof data.myTotalScore === 'number') {
-        console.log('[GameBoard] 🏆 Pontuação total:', data.myTotalScore);
-        setTotalPoints(data.myTotalScore);
-      }
-      
-      // ✅ Fechar modal se estiver aberta
-      setShowModal(false);
-      setValidationData(null);
     };
 
-    const handleGameEnded = (ranking) => {
-      console.log('[GameBoard] Game ended with ranking:', ranking);
-      setFinalRanking(ranking);
-      setIsRoundActive(false);
-    };
-
-    const handleNoAnswersToValidate = () => {
-      console.log('[GameBoard] No answers to validate');
-      setShowModal(false);
-      setValidationData(null);
-    };
-
-    // ✅ Registrar listeners
+    // Registrar listeners
     socket.on('room_config', handleRoomConfig);
     socket.on('themes_updated', handleThemesUpdated);
     socket.on('room_saved_success', handleRoomSaved);
-    // socket.on('duration_updated', handleDurationUpdated); // ✅ REMOVER
     socket.on("round_started", handleRoundStarted);
     socket.on("round_ended", handleRoundEnded);
     socket.on("time_up_round_ended", handleTimeUpRoundEnded);
     socket.on("new_round_started", handleNewRoundStarted);
-    socket.on("start_validation", handleStartValidation);
-    socket.on("reveal", handleReveal);
+    socket.on("start_validation", handleValidationStart);
     socket.on("answer_validated", handleAnswerValidated);
     socket.on("validation_complete", handleValidationComplete);
     socket.on("validation_complete_for_player", handleValidationCompleteForPlayer);
     socket.on("game_ended", handleGameEnded);
     socket.on("no_answers_to_validate", handleNoAnswersToValidate);
+    socket.on("reveal", handleReveal);
 
-    // ✅ Cleanup
+    // Cleanup
     return () => {
       socket.off('room_config', handleRoomConfig);
       socket.off('themes_updated', handleThemesUpdated);
       socket.off('room_saved_success', handleRoomSaved);
-      // socket.off('duration_updated', handleDurationUpdated); // ✅ REMOVER
       socket.off("round_started", handleRoundStarted);
       socket.off("round_ended", handleRoundEnded);
       socket.off("time_up_round_ended", handleTimeUpRoundEnded);
       socket.off("new_round_started", handleNewRoundStarted);
-      socket.off("start_validation", handleStartValidation);
-      socket.off("reveal", handleReveal);
+      socket.off("start_validation", handleValidationStart);
       socket.off("answer_validated", handleAnswerValidated);
       socket.off("validation_complete", handleValidationComplete);
       socket.off("validation_complete_for_player", handleValidationCompleteForPlayer);
       socket.off("game_ended", handleGameEnded);
       socket.off("no_answers_to_validate", handleNoAnswersToValidate);
+      socket.off("reveal", handleReveal);
     };
-  }, [room, setRoomThemes]);
+  }, [room, setRoomThemes, roomThemes, answersSubmitted, handleValidationCompleteForPlayer, handleGameEnded, handleNoAnswersToValidate, userId, validationData]);
 
-  // ✅ useEffect separado para solicitar configuração inicial
+  // ✅ useEffect para configuração inicial
   useEffect(() => {
     if (room) {
       console.log('[GameBoard] Solicitando configuração inicial da sala:', room);
       socket.emit('get_room_config', { room });
     }
-  }, [room]); // ✅ Executar apenas quando 'room' mudar
-
-  // ✅ Componentes
-  const ValidationModal = () => {
-    if (!validationData) return null;
-
-    const isEmptyAnswer = !validationData.answer || validationData.answer.trim() === '';
-
-    return (
-      <Modal onClose={() => setShowModal(false)} showClose={false}>
-        <div className="bg-white p-6 rounded-xl dark:bg-gray-800 dark:text-gray-100 space-y-6 max-w-lg mx-auto">
-          <h4 className="text-2xl text-center font-bold text-blue-700 dark:text-blue-400">
-            🔍 Validando Resposta
-          </h4>
-          
-          <div className="text-center space-y-3">
-            <div className="bg-blue-50 dark:bg-blue-900 p-4 rounded-lg space-y-2">
-              <div className="text-lg font-semibold">
-                👤 Jogador: <span className="text-blue-600 dark:text-blue-400">{validationData.playerNickname}</span>
-              </div>
-              <div className="text-lg font-semibold">
-                📋 Tema: <span className="text-purple-600 dark:text-purple-400">{validationData.theme}</span>
-              </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">
-                📊 Progresso: {validationData.currentIndex}/{validationData.totalItems}
-              </div>
-            </div>
-          </div>
-
-          {revealed ? (
-            <>
-              <div className="text-center">
-                <div className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                  💭 Resposta do jogador:
-                </div>
-                
-                {/* ✅ Mostrar resposta vazia de forma clara */}
-                <div className={`text-2xl font-bold p-4 rounded-lg border-2 ${
-                  isEmptyAnswer 
-                    ? 'bg-red-50 dark:bg-red-900 text-red-800 dark:text-red-200 border-red-300 dark:border-red-600'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-50 border-gray-300 dark:border-gray-600'
-                }`}>
-                  {isEmptyAnswer ? "❌ RESPOSTA VAZIA" : validationData.answer}
-                </div>
-                
-                {/* ✅ Mensagem especial para respostas vazias */}
-                {isEmptyAnswer && (
-                  <div className="mt-3 p-3 bg-orange-100 dark:bg-orange-900 border border-orange-300 dark:border-orange-600 rounded-lg">
-                    <p className="text-orange-800 dark:text-orange-200 font-semibold">
-                      ⚠️ Este jogador não respondeu a este tema
-                    </p>
-                    <p className="text-orange-700 dark:text-orange-300 text-sm">
-                      Respostas vazias sempre valem 0 pontos
-                    </p>
-                  </div>
-                )}
-              </div>
-              
-              {canReveal && !isValidating && !currentValidated && (
-                <>
-                  <div className="text-center text-gray-600 dark:text-gray-400 text-sm mb-4">
-                    {isEmptyAnswer ? (
-                      <span className="text-red-600 dark:text-red-400 font-semibold">
-                        ⚖️ Resposta vazia = 0 pontos (clique em Rejeitar)
-                      </span>
-                    ) : (
-                      <span>
-                        ⚖️ Esta resposta está correta para o tema <strong>{validationData.theme}</strong>?
-                      </span>
-                    )}
-                  </div>
-                  
-                  <div className="flex justify-center space-x-4">
-                    <button
-                      className={`px-6 py-3 rounded-lg shadow-md font-semibold transition-colors flex items-center gap-2 ${
-                        isEmptyAnswer 
-                          ? 'bg-gray-400 text-gray-600 cursor-not-allowed opacity-50' 
-                          : 'bg-green-600 hover:bg-green-700 text-white'
-                      }`}
-                      onClick={() => handleValidate(true)}
-                      disabled={isEmptyAnswer}
-                    >
-                      ✅ Aceitar {isEmptyAnswer ? '(Indisponível)' : '(100/50 pts)'}
-                    </button>
-                    <button
-                      className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg shadow-md font-semibold transition-colors flex items-center gap-2"
-                      onClick={() => handleValidate(false)}
-                    >
-                      ❌ Rejeitar (0 pts)
-                    </button>
-                  </div>
-                  
-                  <div className="text-xs text-gray-500 dark:text-gray-400 text-center">
-                    💡 100 pts = resposta única válida | 50 pts = resposta repetida válida | 0 pts = incorreta/vazia
-                  </div>
-                </>
-              )}
-              
-              {(isValidating || currentValidated) && (
-                <div className="text-center text-gray-600 dark:text-gray-400 py-4">
-                  <div className="animate-spin inline-block w-6 h-6 border-4 border-current border-t-transparent rounded-full mr-2"></div>
-                  ⏳ Processando validação...
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="text-center space-y-4">
-              {canReveal && !isRevealing ? (
-                <>
-                  <p className="text-gray-700 dark:text-gray-300 text-lg mb-4">
-                    👁️ Clique para revelar a resposta e validá-la:
-                  </p>
-                  <button
-                    onClick={handleRevealAnswer}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg shadow-md font-semibold transition-colors"
-                  >
-                    👁️ Mostrar Resposta
-                  </button>
-                </>
-              ) : (
-                <div className="py-8">
-                  <div className="animate-spin inline-block w-8 h-8 border-4 border-current border-t-transparent rounded-full mr-2"></div>
-                  <p className="text-gray-700 dark:text-gray-300 text-lg">
-                    {isRevealing ? "⏳ Revelando resposta..." : "⏱️ Aguardando revelação..."}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </Modal>
-    );
-  };
-
-  const FinalRanking = () => (
-    <section className="bg-white p-6 rounded-xl shadow-lg dark:bg-gray-800">
-      <h3 className="text-3xl font-bold text-center text-blue-700 dark:text-blue-400 mb-6">
-        🏆 Ranking Final da Partida 🏆
-      </h3>
-      
-      {finalRanking && finalRanking.length > 0 ? (
-        <ol className="space-y-3">
-          {finalRanking.map((p, idx) => (
-            <li
-              key={p.playerId}
-              className={`flex justify-between items-center p-4 rounded-lg ${
-                idx === 0 ? "bg-yellow-400 text-gray-900 font-bold" :
-                idx === 1 ? "bg-gray-300 text-gray-800 font-semibold" :
-                idx === 2 ? "bg-orange-300 text-gray-800 font-semibold" :
-                "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100"
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                {idx === 0 && "🥇"}
-                {idx === 1 && "🥈"} 
-                {idx === 2 && "🥉"}
-                {idx > 2 && `${idx + 1}.`}
-                {p.nickname}
-              </span>
-              <span className="text-2xl font-bold">
-                {p.totalScore || 0} pts
-              </span>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <div className="text-center text-gray-600 dark:text-gray-400">
-          <p>Nenhum dado de ranking disponível</p>
-        </div>
-      )}
-      
-      <div className="text-center mt-8 space-y-4">
-        {isAdmin && (
-          <button
-            onClick={handleNewRound}
-            className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold shadow-md transition-colors mr-4"
-          >
-            🔄 Novo Jogo
-          </button>
-        )}
-        <button
-          onClick={handleLeaveRoom}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold shadow-md transition-colors"
-        >
-          🏠 Voltar ao Lobby
-        </button>
-      </div>
-    </section>
-  );
+  }, [room]);
 
   // ✅ Render principal
   return (
@@ -755,7 +566,59 @@ function GameBoard({
       )}
 
       {finalRanking ? (
-        <FinalRanking />
+        <section className="bg-white p-6 rounded-xl shadow-lg dark:bg-gray-800">
+          <h3 className="text-3xl font-bold text-center text-blue-700 dark:text-blue-400 mb-6">
+            🏆 Ranking Final da Partida 🏆
+          </h3>
+          
+          {finalRanking && finalRanking.length > 0 ? (
+            <ol className="space-y-3">
+              {finalRanking.map((p, idx) => (
+                <li
+                  key={p.playerId}
+                  className={`flex justify-between items-center p-4 rounded-lg ${
+                    idx === 0 ? "bg-yellow-400 text-gray-900 font-bold" :
+                    idx === 1 ? "bg-gray-300 text-gray-800 font-semibold" :
+                    idx === 2 ? "bg-orange-300 text-gray-800 font-semibold" :
+                    "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    {idx === 0 && "🥇"}
+                    {idx === 1 && "🥈"} 
+                    {idx === 2 && "🥉"}
+                    {idx > 2 && `${idx + 1}.`}
+                    {p.nickname}
+                  </span>
+                  <span className="text-2xl font-bold">
+                    {p.totalScore || 0} pts
+                  </span>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div className="text-center text-gray-600 dark:text-gray-400">
+              <p>Nenhum dado de ranking disponível</p>
+            </div>
+          )}
+          
+          <div className="text-center mt-8 space-y-4">
+            {isAdmin && (
+              <button
+                onClick={handleNewRound}
+                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-semibold shadow-md transition-colors mr-4"
+              >
+                🔄 Novo Jogo
+              </button>
+            )}
+            <button
+              onClick={handleLeaveRoom}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold shadow-md transition-colors"
+            >
+              🏠 Voltar ao Lobby
+            </button>
+          </div>
+        </section>
       ) : (
         <>
           {/* Theme Management */}
@@ -864,7 +727,6 @@ function GameBoard({
                         {a.points} pontos
                       </div>
                       
-                      {/* ✅ Mostrar explicação da pontuação */}
                       <div className="text-xs text-right text-gray-600 dark:text-gray-400">
                         {a.points === 100 && '🟢 Resposta única válida'}
                         {a.points === 50 && '🟡 Resposta repetida válida'} 
@@ -903,7 +765,139 @@ function GameBoard({
           )}
 
           {/* Validation Modal */}
-          {showModal && validationData && <ValidationModal />}
+          {showModal && validationData && (
+            <Modal 
+              isOpen={showModal} 
+              onClose={() => {
+                if (validationData.isValidator) {
+                  setShowModal(false);
+                  setValidationData(null);
+                }
+              }}
+            >
+              <div className="space-y-4">
+                <h3 className="text-lg font-bold text-center text-gray-800">
+                  {validationData.isValidator ? (
+                    <>✏️ Validação de Resposta</>
+                  ) : (
+                    <>👀 Acompanhando Validação</>
+                  )}
+                  <div className="text-xs text-gray-500 mt-1">
+                    ValidatorId: {validationData.validatorId}<br/>
+                    Socket.userId: {socket.userId || 'undefined'}<br/>
+                    Props.userId: {userId || 'undefined'}<br/>
+                    MyUserId final: {validationData.myUserId || 'undefined'}<br/>
+                    Sou validador: {validationData.isValidator ? 'SIM' : 'NÃO'}
+                  </div>
+                </h3>
+                
+                <div className="bg-gray-200 rounded-full h-2 mb-4">
+                  <div 
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                    style={{ 
+                      width: `${(validationData.currentIndex / validationData.totalItems) * 100}%` 
+                    }}
+                  ></div>
+                </div>
+                <p className="text-sm text-gray-600 text-center">
+                  {validationData.currentIndex} de {validationData.totalItems}
+                </p>
+
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <p><strong>Jogador:</strong> {validationData.playerNickname}</p>
+                  <p><strong>Tema:</strong> {validationData.theme}</p>
+                  <p><strong>Resposta:</strong> 
+                      <span className={`ml-2 px-2 py-1 rounded ${
+                          !validationData.answer || validationData.answer.trim() === "" 
+                              ? "bg-gray-200 text-gray-600" 
+                              : "bg-green-100 text-green-800"
+                      }`}>
+                          {!validationData.answer || validationData.answer.trim() === "" 
+                              ? "Vazia" 
+                              : validationData.answer
+                          }
+                      </span>
+                  </p>
+                  
+                  {!validationData.isValidator && (
+                      <p className="text-sm text-gray-600 mt-2">
+                          <strong>Validador:</strong> {validationData.validatorNickname}
+                      </p>
+                  )}
+                </div>
+
+                {validationData.showResult && validationData.resultData && (
+                    <div className={`p-4 rounded-lg text-center ${
+                        validationData.resultData.valid 
+                            ? 'bg-green-100 border-green-500 border-2' 
+                            : 'bg-red-100 border-red-500 border-2'
+                    }`}>
+                        <p className="font-bold text-lg">
+                            {validationData.resultData.valid ? '✅ VÁLIDA' : '❌ INVÁLIDA'}
+                        </p>
+                        <p className="text-sm mt-1">
+                            {validationData.resultData.playerNickname} - {validationData.resultData.theme}: "{validationData.resultData.answer}"
+                        </p>
+                    </div>
+                )}
+
+                {validationData.isValidator && !validationData.showResult && (
+                    <>
+                        <div className="flex gap-4">
+                            <button
+                                className="flex-1 bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition-colors font-medium"
+                                onClick={() => {
+                                    console.log('[GameBoard] Clicou em VÁLIDA');
+                                    handleValidateAnswer(true);
+                                }}
+                            >
+                                ✅ Válida
+                            </button>
+                            <button
+                                className="flex-1 bg-red-600 text-white py-3 px-4 rounded-lg hover:bg-red-700 transition-colors font-medium"
+                                onClick={() => {
+                                    console.log('[GameBoard] Clicou em INVÁLIDA');
+                                    handleValidateAnswer(false);
+                                }}
+                            >
+                                ❌ Inválida
+                            </button>
+                        </div>
+
+                        <button
+                            className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                            onClick={() => {
+                                console.log('[GameBoard] Clicou em REVELAR');
+                                handleRevealAnswer();
+                            }}
+                            disabled={isRevealing}
+                        >
+                            {isRevealing ? '⏳ Revelando...' : '👁️ Revelar Resposta'}
+                        </button>
+                    </>
+                )}
+
+                {!validationData.isValidator && (
+                    <div className="text-center text-gray-600 text-sm">
+                        <p>Aguardando validação de <strong>{validationData.validatorNickname}</strong></p>
+                    </div>
+                )}
+
+                <div className="text-xs text-gray-400 border-t pt-2">
+                  <details>
+                    <summary>Debug Info</summary>
+                    <pre>{JSON.stringify({
+                      isValidator: validationData.isValidator,
+                      validatorId: validationData.validatorId,
+                      myUserId: socket.userId,
+                      showResult: validationData.showResult,
+                      isAdmin: isAdmin
+                    }, null, 2)}</pre>
+                  </details>
+                </div>
+              </div>
+            </Modal>
+          )}
 
           {/* Botões de controle */}
           {totalPoints !== null && !finalRanking && (

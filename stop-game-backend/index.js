@@ -400,6 +400,17 @@ function applyThemeScoring(room, themeIndex, allAnswers, themes) {
 io.on('connection', (socket) => {
     console.log(`[Socket.io] Nova conexão: ${socket.id}`);
 
+    // ✅ ADICIONAR: Handler para identificação do socket
+    socket.on('identify', ({ userId, nickname }) => {
+        console.log(`[Socket.io] 🆔 Socket ${socket.id} identificado como:`, { userId, nickname });
+        
+        // ✅ Armazenar dados no socket
+        socket.userId = userId;
+        socket.nickname = nickname;
+        
+        console.log(`[Socket.io] ✅ Socket identificado: ${nickname} (${userId})`);
+    });
+
     socket.on('join_room', async (data) => {
         try {
             const roomId = data.roomId || data.room;
@@ -732,9 +743,46 @@ io.on('connection', (socket) => {
         io.to(room).emit('reveal');
     });
 
+    // ✅ CORRIGIR: Handler reveal_answer
     socket.on('reveal_answer', ({ room }) => {
-        console.log(`[Socket.io] Reveal answer requested for room ${room}`);
-        io.to(room).emit('reveal');
+        try {
+            console.log(`[Socket.io] Reveal answer requested for room ${room}`);
+            
+            // ✅ Verificar se há validação em progresso
+            const config = roomConfigs[room];
+            if (!config || !config.validationQueue || !config.validatorId) {
+                console.log(`[Validation] No validation in progress for room ${room}`);
+                return;
+            }
+
+            // ✅ Verificar se é o validador
+            if (socket.userId !== config.validatorId) {
+                console.log(`[Validation] Unauthorized reveal attempt by ${socket.userId} in room ${room}`);
+                return;
+            }
+
+            // ✅ Obter item atual da validação
+            const currentItem = config.validationQueue[config.currentValidation];
+            if (!currentItem) {
+                console.log(`[Validation] No current validation item for room ${room}`);
+                return;
+            }
+
+            console.log(`[Socket.io] ✅ Revelando resposta: "${currentItem.answer}" para sala ${room}`);
+
+            // ✅ Enviar para todos na sala
+            io.to(room).emit('reveal', {
+                playerId: currentItem.playerId,
+                playerNickname: currentItem.playerNickname,
+                theme: currentItem.theme,
+                answer: currentItem.answer,
+                currentIndex: config.currentValidation + 1,
+                totalItems: config.validationQueue.length
+            });
+
+        } catch (error) {
+            console.error('[Socket.io] Error revealing answer:', error);
+        }
     });
 
     socket.on("validate_answer", async ({ valid, room }) => {
@@ -879,14 +927,26 @@ io.on('connection', (socket) => {
             config.isCountingDown = false;
             config.gameEnded = false;
             
+            // ✅ MELHORIA 2: Limpar respostas da rodada anterior AQUI
+            delete config.lastRoundAnswers;
+            delete config.playersAnswers; // ✅ Limpar dados de validação aqui
+            
+            // ✅ Limpar respostas dos sockets
+            const roomSockets = io.sockets.adapter.rooms.get(room);
+            if (roomSockets) {
+                for (const socketId of roomSockets) {
+                    const playerSocket = io.sockets.sockets.get(socketId);
+                    if (playerSocket) {
+                        delete playerSocket.submittedAnswers;
+                    }
+                }
+            }
+            
             if (gameState.has(room)) {
                 const roomState = gameState.get(room);
                 roomState.answers.clear();
                 roomState.currentValidation = null;
             }
-
-            // ✅ NÃO salvar automaticamente no Firestore
-            // await saveRoomConfigToFirestore(room, config); // ❌ REMOVIDO
 
             console.log(`[Socket.io] New round started for room ${room}`);
 
@@ -1218,7 +1278,7 @@ io.on('connection', (socket) => {
         }
     }
 
-    // ✅ ADICIONAR: processNextValidation
+    // ✅ MELHORIA 1: processNextValidation - Enviar para todos
     function processNextValidation(room) {
         try {
             const config = roomConfigs[room];
@@ -1228,6 +1288,7 @@ io.on('connection', (socket) => {
             }
 
             console.log(`[Socket.io] 🔍 processNextValidation - Atual: ${config.currentValidation}/${config.validationQueue.length}`);
+            console.log(`[Socket.io] 🎯 Validador definido: ${config.validatorId}`); // ✅ DEBUG
 
             if (config.currentValidation >= config.validationQueue.length) {
                 console.log(`[Socket.io] ✅ Validação completa para sala ${room}`);
@@ -1243,22 +1304,30 @@ io.on('connection', (socket) => {
 
             // ✅ Buscar validador
             let validatorSocket = null;
+            let validatorNickname = 'Validador';
+            
+            // ✅ Primeiro tentar encontrar por ID direto
             validatorSocket = io.sockets.sockets.get(config.validatorId);
             
             if (!validatorSocket) {
                 console.log(`[Socket.io] ❌ Validador não encontrado por ID direto: ${config.validatorId}`);
                 
+                // ✅ Procurar na sala por userId
                 const roomSockets = io.sockets.adapter.rooms.get(room);
                 if (roomSockets) {
                     for (const socketId of roomSockets) {
                         const socket = io.sockets.sockets.get(socketId);
                         if (socket && socket.userId === config.validatorId) {
                             validatorSocket = socket;
-                            console.log(`[Socket.io] ✅ Validador encontrado na sala por userId: ${socket.nickname || socketId}`);
+                            validatorNickname = socket.nickname || 'Validador';
+                            console.log(`[Socket.io] ✅ Validador encontrado na sala: ${validatorNickname} (${socket.userId})`);
                             break;
                         }
                     }
                 }
+            } else {
+                validatorNickname = validatorSocket.nickname || 'Validador';
+                console.log(`[Socket.io] ✅ Validador encontrado por ID: ${validatorNickname} (${config.validatorId})`);
             }
 
             if (!validatorSocket) {
@@ -1268,49 +1337,31 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            console.log(`[Socket.io] ✅ Validador encontrado: ${validatorSocket.nickname || validatorSocket.userId}`);
-
-            // ✅ Emitir para o validador
-            console.log(`[Socket.io] 📤 Enviando start_validation para ${validatorSocket.nickname || config.validatorId}`);
-            
             const validationData = {
                 playerId: currentItem.playerId,
                 playerNickname: currentItem.playerNickname,
                 theme: currentItem.theme,
                 answer: currentItem.answer,
                 currentIndex: config.currentValidation + 1,
-                totalItems: config.validationQueue.length
+                totalItems: config.validationQueue.length,
+                validatorId: config.validatorId, // ✅ IMPORTANTE: Enviar ID do validador
+                validatorNickname: validatorNickname
             };
 
             console.log(`[Socket.io] 📦 Dados da validação:`, validationData);
+            console.log(`[Socket.io] 🎯 Enviando para TODA a sala ${room} - Validador: ${config.validatorId}`);
             
-            validatorSocket.emit('start_validation', validationData);
+            // ✅ MELHORIA 1: Enviar para TODOS na sala
+            io.to(room).emit('start_validation', validationData);
             
-            console.log(`[Socket.io] ✅ start_validation enviado com sucesso`);
+            console.log(`[Socket.io] ✅ start_validation enviado para TODA a sala ${room}`);
 
         } catch (error) {
             console.error('[Socket.io] ❌ Error processing next validation:', error);
         }
     }
 
-    // ✅ ADICIONAR: normalizeAnswer function
-    function normalizeAnswer(answer) {
-        if (!answer || typeof answer !== 'string') return '';
-        
-        return answer
-            .toLowerCase()
-            .trim()
-            .replace(/[áàâãäåæ]/g, 'a')
-            .replace(/[éèêë]/g, 'e')
-            .replace(/[íìîï]/g, 'i')
-            .replace(/[óòôõöø]/g, 'o')
-            .replace(/[úùûü]/g, 'u')
-            .replace(/[ç]/g, 'c')
-            .replace(/[ñ]/g, 'n')
-            .replace(/[^a-z0-9]/g, ''); // Remove acentos e caracteres especiais
-    }
-
-    // ✅ SUBSTITUIR: Handler de validação
+    // ✅ MELHORIA 1: Handler de validação - Notificar todos sobre resultado
     socket.on('validate_answer', ({ valid, room }) => {
         try {
             const config = roomConfigs[room];
@@ -1332,16 +1383,20 @@ io.on('connection', (socket) => {
                 valid
             });
 
-            // ✅ IMPORTANTE: Salvar resultado da validação (sem calcular pontos ainda)
+            // ✅ Salvar resultado da validação
             if (config.playersAnswers[currentItem.playerId] && config.playersAnswers[currentItem.playerId].answers[currentItem.theme]) {
                 config.playersAnswers[currentItem.playerId].answers[currentItem.theme].valid = valid;
                 config.playersAnswers[currentItem.playerId].answers[currentItem.theme].reason = valid ? "Resposta válida" : "Resposta inválida";
             }
 
-            // ✅ Emitir confirmação
-            socket.emit('answer_validated', {
+            // ✅ MELHORIA 1: Notificar TODOS sobre o resultado da validação
+            io.to(room).emit('answer_validated', {
                 theme: currentItem.theme,
-                valid
+                playerNickname: currentItem.playerNickname,
+                answer: currentItem.answer,
+                valid,
+                currentIndex: config.currentValidation + 1,
+                totalItems: config.validationQueue.length
             });
 
             // ✅ Avançar para próxima validação
@@ -1349,14 +1404,14 @@ io.on('connection', (socket) => {
             
             setTimeout(() => {
                 processNextValidation(room);
-            }, 500);
+            }, 1500); // ✅ Delay para todos verem o resultado
 
         } catch (error) {
             console.error('[Socket.io] Error validating answer:', error);
         }
     });
 
-    // ✅ ADICIONAR: Função para completar validação COM detecção de duplicatas
+    // ✅ MELHORIA 2: Função completeValidation - NÃO limpar respostas
     function completeValidation(room) {
         try {
             const config = roomConfigs[room];
@@ -1367,13 +1422,11 @@ io.on('connection', (socket) => {
 
             console.log(`[Socket.io] 🏁 Completando validação para sala ${room}`);
 
-            // ✅ CORREÇÃO PRINCIPAL: Calcular pontos com detecção de duplicatas
             const themes = config.themes || ['Nome', 'Cidade', 'País', 'Marca', 'Cor', 'Animal', 'Objeto', 'Fruta'];
             
             themes.forEach(theme => {
                 console.log(`[Socket.io] 🎯 Calculando pontos para tema: ${theme}`);
                 
-                // ✅ Coletar todas as respostas válidas para este tema
                 const validAnswersForTheme = [];
                 
                 Object.keys(config.playersAnswers).forEach(playerId => {
@@ -1388,27 +1441,23 @@ io.on('connection', (socket) => {
                     }
                 });
 
-                // ✅ Contar duplicatas por resposta normalizada
                 const answerCounts = {};
                 validAnswersForTheme.forEach(item => {
                     answerCounts[item.normalizedAnswer] = (answerCounts[item.normalizedAnswer] || 0) + 1;
                 });
 
-                // ✅ Aplicar pontuação baseada em duplicatas
                 validAnswersForTheme.forEach(item => {
                     const count = answerCounts[item.normalizedAnswer];
                     const isUnique = count === 1;
                     const points = isUnique ? 100 : 50;
                     const reason = isUnique ? "Resposta única" : `Resposta repetida (${count} jogadores)`;
                     
-                    // ✅ Atualizar pontos
                     config.playersAnswers[item.playerId].answers[theme].points = points;
                     config.playersAnswers[item.playerId].answers[theme].reason = reason;
                     
                     console.log(`[Socket.io] 📊 ${theme} - "${item.originalAnswer}" - ${item.playerNickname}: ${points} pontos (${isUnique ? 'única' : 'repetida'})`);
                 });
 
-                // ✅ Respostas inválidas ou vazias = 0 pontos
                 Object.keys(config.playersAnswers).forEach(playerId => {
                     const playerAnswer = config.playersAnswers[playerId].answers[theme];
                     if (playerAnswer && (playerAnswer.points === null || playerAnswer.points === undefined)) {
@@ -1422,6 +1471,9 @@ io.on('connection', (socket) => {
                 });
             });
 
+            // ✅ MELHORIA 2: Salvar respostas da rodada no config
+            config.lastRoundAnswers = JSON.parse(JSON.stringify(config.playersAnswers));
+
             // ✅ Enviar resultados individuais para cada jogador
             Object.keys(config.playersAnswers).forEach(playerId => {
                 const playerData = config.playersAnswers[playerId];
@@ -1431,7 +1483,6 @@ io.on('connection', (socket) => {
                     let roundScore = 0;
                     const myAnswers = [];
 
-                    // ✅ Calcular pontuação da rodada
                     themes.forEach(theme => {
                         const answerData = playerData.answers[theme];
                         if (answerData) {
@@ -1445,10 +1496,8 @@ io.on('connection', (socket) => {
                         }
                     });
 
-                    // ✅ Atualizar pontuação total
                     playerSocket.totalScore = (playerSocket.totalScore || 0) + roundScore;
 
-                    // ✅ Enviar resultado individual
                     playerSocket.emit('validation_complete_for_player', {
                         myAnswers,
                         myScore: roundScore,
@@ -1459,14 +1508,17 @@ io.on('connection', (socket) => {
                 }
             });
 
-            // ✅ Emitir conclusão geral
-            io.to(room).emit('validation_complete');
+            // ✅ MELHORIA 2: Enviar dados completos para todos manterem respostas visíveis
+            io.to(room).emit('validation_complete', {
+                roundComplete: true,
+                allAnswers: config.playersAnswers // ✅ Dados para manter respostas visíveis
+            });
 
-            // ✅ Limpar dados de validação
+            // ✅ MELHORIA 2: Limpar apenas dados temporários (manter lastRoundAnswers)
             delete config.validationQueue;
             delete config.currentValidation;
             delete config.validatorId;
-            delete config.playersAnswers;
+            // ✅ NÃO deletar config.playersAnswers ainda - manter para visualização
 
             console.log(`[Socket.io] ✅ Validação completada para sala ${room}`);
 

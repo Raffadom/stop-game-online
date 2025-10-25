@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { socket } from './socket';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { socket } from "./socket";
 import Home from './components/Home';
 import Room from './components/Room';
 import { v4 as uuidv4 } from 'uuid';
@@ -31,10 +31,10 @@ function App() {
     type: ''
   });
 
-  // CORREÇÃO: Adicionar refs que estavam faltando
   const timerRef = useRef(null);
   const [timeLeft, setTimeLeft] = useState(0);
 
+  // ✅ Inicializar userId
   useEffect(() => {
     let storedUserId = localStorage.getItem('userId');
     if (!storedUserId) {
@@ -42,10 +42,95 @@ function App() {
       localStorage.setItem('userId', storedUserId);
     }
     setUserId(storedUserId);
+    
+    // ✅ Conectar socket com userId
+    if (socket && !socket.connected) {
+      socket.auth = { userId: storedUserId };
+      socket.connect();
+    }
   }, []);
 
-  // CORREÇÃO: Adicionar handleError que estava faltando
-  const handleError = (error) => {
+  // ✅ Função para entrar/criar sala
+  const handleJoinOrCreateRoom = useCallback((roomName, nickname, isCreating = false) => {
+    if (!roomName?.trim() || !nickname?.trim()) {
+      console.log('[App] Nome da sala e nickname são obrigatórios');
+      setRoomError('Nome da sala e nickname são obrigatórios');
+      return;
+    }
+
+    const trimmedRoomName = roomName.trim();
+    const trimmedNickname = nickname.trim();
+    
+    console.log('[App] Tentando', isCreating ? 'criar' : 'entrar na', 'sala:', trimmedRoomName);
+    
+    // ✅ Atualizar estados locais
+    setNickname(trimmedNickname);
+    setRoomName(trimmedRoomName);
+    setRoomError('');
+
+    try {
+      if (isCreating) {
+        socket.emit("create_room", { 
+          room: trimmedRoomName,
+          nickname: trimmedNickname,
+          userId: userId
+        });
+      } else {
+        socket.emit("join_room", { 
+          room: trimmedRoomName,
+          nickname: trimmedNickname,
+          userId: userId
+        });
+      }
+    } catch (error) {
+      console.error('[App] Erro ao emitir evento:', error);
+      setRoomError('Erro ao conectar com o servidor');
+    }
+  }, [userId]);
+
+  // ✅ Handlers para eventos de sala
+  const handleRoomJoined = useCallback((data) => {
+    console.log('[App] Room joined:', data);
+    
+    if (data.room && data.player && data.players) {
+      setRoomName(data.room);
+      setCurrentPage('room');
+      setNickname(data.player.nickname);
+      setIsAdmin(data.player.isCreator);
+      setPlayersInRoom(data.players);
+      setRoomError('');
+      
+      console.log('[App] Estado atualizado - Room:', data.room, 'Admin:', data.player.isCreator);
+    }
+  }, []);
+
+  const handleRoomCreated = useCallback((data) => {
+    console.log('[App] Room created:', data);
+    
+    if (data.room) {
+      setRoomName(data.room);
+      setCurrentPage('room');
+      setIsAdmin(true);
+      setRoomError('');
+      
+      if (data.themes) {
+        setRoomThemes(data.themes);
+      }
+    }
+  }, []);
+
+  const handleRoomError = useCallback((data) => {
+    console.log('[App] Room error:', data);
+    setRoomError(data.message || 'Erro desconhecido');
+    setAlertState({
+      isVisible: true,
+      message: data.message || 'Erro desconhecido',
+      type: 'error'
+    });
+  }, []);
+
+  // ✅ Outros handlers
+  const handleError = useCallback((error) => {
     console.error('[App] Socket error:', error);
     setRoomError(error.message || 'Erro de conexão');
     setAlertState({
@@ -53,53 +138,51 @@ function App() {
       message: error.message || 'Erro de conexão',
       type: 'error'
     });
-  };
+  }, []);
 
-  // CORREÇÃO: Definir handlers que estavam sendo referenciados
-  const handleRoundStartCountdown = (data) => {
+  const handleRoundStartCountdown = useCallback((data) => {
     console.log('[App] Countdown received:', data.countdown);
     setCountdown(data.countdown);
-  };
+  }, []);
 
-  const handleRoundStarted = (data) => {
+  const handleRoundStarted = useCallback((data) => {
     console.log('[App] Round started with letter:', data.letter);
     setRoundStarted(true);
     setRoundEnded(false);
     setLetter(data.letter);
     setCountdown(null);
     setStopClickedByMe(false);
-  };
+  }, []);
 
-  const handleRoundEnded = () => {
+  const handleRoundEnded = useCallback(() => {
     console.log('[App] Round ended');
     setRoundStarted(false);
     setRoundEnded(true);
     setStopClickedByMe(false);
-  };
+  }, []);
 
-  const handleTimeUpRoundEnded = () => {
+  const handleTimeUpRoundEnded = useCallback(() => {
     console.log('[App] ⏰ Tempo esgotado - finalizando rodada');
     setRoundEnded(true);
     setRoundStarted(false);
     
-    // CORREÇÃO: Reset do timer se ainda estiver ativo
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
     setTimeLeft(0);
-  };
+  }, []);
 
-  const handleNewRoundStarted = () => {
+  const handleNewRoundStarted = useCallback(() => {
     console.log('[App] New round started');
     setRoundStarted(false);
     setRoundEnded(false);
     setLetter('');
     setCountdown(null);
     setStopClickedByMe(false);
-  };
+  }, []);
 
-  const handleRoomSavedSuccess = () => {
+  const handleRoomSavedSuccess = useCallback(() => {
     console.log('[App] Room saved successfully');
     setIsRoomSaved(true);
     setAlertState({
@@ -107,10 +190,43 @@ function App() {
       message: "Sala salva com sucesso!",
       type: "success"
     });
-  };
+  }, []);
 
+  const handlePlayersUpdate = useCallback((players) => {
+    console.log('[App] Players update received:', players);
+    setPlayersInRoom(players);
+  }, []);
+
+  const handleRoomConfig = useCallback((config) => {
+    console.log('[App] Room config received:', config);
+    
+    if (config.themes && Array.isArray(config.themes)) {
+      setRoomThemes(config.themes);
+    }
+    
+    if (config.duration) {
+      setRoomDuration(config.duration);
+    }
+    
+    if (typeof config.roundActive === 'boolean') {
+      setRoundStarted(config.roundActive);
+    }
+    
+    if (typeof config.roundEnded === 'boolean') {
+      setRoundEnded(config.roundEnded);
+    }
+    
+    if (config.currentLetter) {
+      setLetter(config.currentLetter);
+    }
+    
+    if (typeof config.isSaved === 'boolean') {
+      setIsRoomSaved(config.isSaved);
+    }
+  }, []);
+
+  // ✅ Socket listeners
   useEffect(() => {
-    // CORREÇÃO: Não usar userId como dependência se ainda não foi definido
     if (!userId) return;
 
     const handleConnect = () => {
@@ -123,57 +239,12 @@ function App() {
       setIsConnected(false);
     };
 
-    const handlePlayersUpdate = (players) => {
-      console.log('[App] Players update received:', players);
-      setPlayersInRoom(players);
-    };
-
-    const handleRoomJoined = (data) => {
-      console.log('[App] Room joined:', data);
-      
-      if (data.room && data.player && data.players) {
-        setRoomName(data.room);
-        setCurrentPage('room');
-        setNickname(data.player.nickname);
-        setIsAdmin(data.player.isCreator);
-        setPlayersInRoom(data.players);
-        
-        console.log('[App] Estado atualizado - Room:', data.room, 'Admin:', data.player.isCreator, 'Players:', data.players.length);
-      }
-    };
-
-    const handleRoomConfig = (config) => {
-      console.log('[App] Room config received:', config);
-      
-      if (config.themes && Array.isArray(config.themes)) {
-        setRoomThemes(config.themes);
-      }
-      
-      if (config.duration) {
-        setRoomDuration(config.duration);
-      }
-      
-      if (typeof config.roundActive === 'boolean') {
-        setRoundStarted(config.roundActive);
-      }
-      
-      if (typeof config.roundEnded === 'boolean') {
-        setRoundEnded(config.roundEnded);
-      }
-      
-      if (config.currentLetter) {
-        setLetter(config.currentLetter);
-      }
-      
-      if (typeof config.isSaved === 'boolean') {
-        setIsRoomSaved(config.isSaved);
-      }
-    };
-
-    // Socket listeners
+    // Registrar listeners
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
     socket.on('room_joined', handleRoomJoined);
+    socket.on('room_created', handleRoomCreated);
+    socket.on('room_error', handleRoomError);
     socket.on('players_update', handlePlayersUpdate);
     socket.on('round_start_countdown', handleRoundStartCountdown);
     socket.on('round_started', handleRoundStarted);
@@ -181,13 +252,15 @@ function App() {
     socket.on('time_up_round_ended', handleTimeUpRoundEnded);
     socket.on('new_round_started', handleNewRoundStarted);
     socket.on('room_config', handleRoomConfig);
-    socket.on('room_saved_success', handleRoomSavedSuccess); // CORREÇÃO: Adicionar listener
+    socket.on('room_saved_success', handleRoomSavedSuccess);
     socket.on('error', handleError);
 
     return () => {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
       socket.off('room_joined', handleRoomJoined);
+      socket.off('room_created', handleRoomCreated);
+      socket.off('room_error', handleRoomError);
       socket.off('players_update', handlePlayersUpdate);
       socket.off('round_start_countdown', handleRoundStartCountdown);
       socket.off('round_started', handleRoundStarted);
@@ -202,21 +275,24 @@ function App() {
         clearInterval(timerRef.current);
       }
     };
-  }, [userId]); // CORREÇÃO: Usar userId como dependência em vez de currentUser
+  }, [
+    userId,
+    handleRoomJoined,
+    handleRoomCreated,
+    handleRoomError,
+    handlePlayersUpdate,
+    handleRoundStartCountdown,
+    handleRoundStarted,
+    handleRoundEnded,
+    handleTimeUpRoundEnded,
+    handleNewRoundStarted,
+    handleRoomConfig,
+    handleRoomSavedSuccess,
+    handleError
+  ]);
 
-  const handleJoinOrCreateRoom = (roomName, nickname) => {
-    console.log(`Tentando entrar/criar sala: ${roomName} com nickname: ${nickname}`);
-    setNickname(nickname);
-    setRoomError('');
-    
-    socket.emit('join_room', {
-      userId,
-      nickname,
-      room: roomName
-    });
-  };
-
-  const handleLeaveRoom = () => {
+  // ✅ Funções de controle
+  const handleLeaveRoom = useCallback(() => {
     setCurrentPage('home');
     setRoomName('');
     setNickname('');
@@ -235,25 +311,25 @@ function App() {
       userId,
       room: roomName
     });
-  };
+  }, [userId, roomName]);
 
-  const handleStartRound = () => {
+  const handleStartRound = useCallback(() => {
     socket.emit('start_round', { room: roomName });
-  };
+  }, [roomName]);
 
-  const handleStopRound = () => {
+  const handleStopRound = useCallback(() => {
     setStopClickedByMe(true);
     socket.emit('stop_round', { userId, room: roomName });
-  };
+  }, [userId, roomName]);
 
-  const handleSaveRoom = (roomName) => {
+  const handleSaveRoom = useCallback((roomName) => {
     socket.emit('save_room', { room: roomName });
     setIsRoomSaved(true);
-  };
+  }, []);
 
-  const onResetRound = () => {
+  const onResetRound = useCallback(() => {
     setResetRoundFlag(prev => prev + 1);
-  };
+  }, []);
 
   return (
     <div className="App" data-testid="app-container">

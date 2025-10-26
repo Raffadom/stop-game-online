@@ -1016,7 +1016,56 @@ io.on('connection', (socket) => {
         }
     });
 
-}); // ✅ FECHAR o io.on('connection') AQUI
+    // ✅ ADICIONAR: Handler time_up (que estava completamente ausente)
+    socket.on('time_up', async (data = {}) => {
+        try {
+            const room = data.room || socket.room;
+            if (!room) throw new Error("Room not specified");
+
+            console.log(`[Socket.io] ⏰ Tempo esgotado na sala ${room} - Processando automaticamente`);
+            
+            const config = roomConfigs[room];
+            if (!config || !config.roundActive) {
+                console.log(`[Socket.io] ⚠️ Rodada não está ativa ou sala não encontrada: ${room}`);
+                return;
+            }
+
+            console.log(`[Socket.io] 🛑 Finalizando rodada por timeout na sala ${room}`);
+
+            // ✅ Marcar rodada como finalizada
+            config.roundActive = false;
+            config.roundEnded = true;
+
+            // ✅ IMPORTANTE: Admin vira validador automaticamente quando tempo esgota
+            const adminId = config.creatorId;
+            config.stopClickedByMe = adminId; // ✅ Admin "clicou" STOP automaticamente
+            
+            console.log(`[Socket.io] 🎯 Admin definido como validador após timeout: ${adminId}`);
+
+            // ✅ Emitir fim de rodada (mesmo evento que stop_round)
+            console.log(`[Socket.io] ✅ Evento 'time_up_round_ended' enviado para sala ${room}`);
+            io.to(room).emit('time_up_round_ended', { 
+                validatorId: adminId,
+                message: "Tempo esgotado!"
+            });
+
+            emitRoomConfig(room, config);
+
+            console.log(`[Socket.io] Round ended by timeout for room ${room}, admin is validator`);
+
+            // ✅ IMPORTANTE: Iniciar processo de validação automaticamente
+            setTimeout(() => {
+                console.log(`[Socket.io] 🔄 Iniciando validação automática após timeout...`);
+                startValidationProcess(room, adminId); // ✅ Admin será o validador
+            }, 2000);
+
+        } catch (error) {
+            console.error('[Socket.io] Error in time_up:', error);
+            socket.emit("error", { message: error.message });
+        }
+    });
+
+}); // ✅ FECHAR o io.on('connection')
 
 // ✅ MOVER: Funções para FORA do socket connection
 

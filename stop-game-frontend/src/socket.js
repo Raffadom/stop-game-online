@@ -1,39 +1,30 @@
 // socket.js
 import { io } from 'socket.io-client';
 
-const serverURL = 'http://localhost:3001';
-export const socket = io(serverURL, {
-  autoConnect: false, // ✅ Não conectar automaticamente
+// ✅ CORRIGIR: URL real do seu backend no Render
+const BACKEND_URL = import.meta.env.PROD 
+    ? 'https://stop-game-backend.onrender.com' // ✅ URL correta do Render
+    : 'http://localhost:3001';
+
+console.log('[Socket] Conectando em:', BACKEND_URL, '- Modo:', import.meta.env.PROD ? 'PRODUÇÃO' : 'DESENVOLVIMENTO');
+
+export const socket = io(BACKEND_URL, {
+    transports: ['websocket', 'polling'],
+    timeout: 20000,
+    forceNew: true,
+    upgrade: true,
+    rememberUpgrade: false
 });
 
-// ✅ ADICIONAR: Função para conectar com userId
-export const connectWithUserId = (userId, nickname) => {
-  console.log('[Socket] Conectando com userId:', userId, 'nickname:', nickname);
-  
-  // ✅ Armazenar userId no socket antes de conectar
-  socket.userId = userId;
-  socket.nickname = nickname;
-  
-  // ✅ Conectar ao servidor
-  socket.connect();
-  
-  // ✅ Enviar identificação assim que conectar
-  socket.on('connect', () => {
-    console.log('[Socket] Conectado! Enviando identificação...');
-    socket.emit('identify', { userId, nickname });
-  });
-};
-
-// ✅ Event listeners para debug
+// Log de conexão
 socket.on('connect', () => {
-  console.log('Socket.IO CLIENT: Conectado ao servidor! ID:', socket.id);
-  console.log('Socket.IO CLIENT: UserId armazenado:', socket.userId);
+    console.log('Socket.IO CLIENT: Conectado ao servidor');
 });
 
 socket.on('disconnect', (reason) => {
-  console.log('Socket.IO CLIENT: Desconectado. Motivo:', reason);
+    console.log('Socket.IO CLIENT: Desconectado. Motivo:', reason);
 });
 
-socket.on('error', (error) => {
-  console.error('Socket.IO CLIENT: Erro:', error);
+socket.on('connect_error', (error) => {
+    console.error('Socket.IO CLIENT: Erro de conexão:', error);
 });

@@ -790,13 +790,6 @@ function GameBoard({
                   ) : (
                     <>👀 Acompanhando Validação</>
                   )}
-                  <div className="text-xs text-gray-500 mt-1">
-                    ValidatorId: {validationData.validatorId}<br/>
-                    Socket.userId: {socket.userId || 'undefined'}<br/>
-                    Props.userId: {userId || 'undefined'}<br/>
-                    MyUserId final: {validationData.myUserId || 'undefined'}<br/>
-                    Sou validador: {validationData.isValidator ? 'SIM' : 'NÃO'}
-                  </div>
                 </h3>
                 
                 <div className="bg-gray-200 rounded-full h-2 mb-4">
@@ -849,60 +842,36 @@ function GameBoard({
                     </div>
                 )}
 
+                {/* ✅ CORRIGIR: Apenas botões de validação para validador */}
                 {validationData.isValidator && !validationData.showResult && (
-                    <>
-                        <div className="flex gap-4">
-                            <button
-                                className="flex-1 bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition-colors font-medium"
-                                onClick={() => {
-                                    console.log('[GameBoard] Clicou em VÁLIDA');
-                                    handleValidateAnswer(true);
-                                }}
-                            >
-                                ✅ Válida
-                            </button>
-                            <button
-                                className="flex-1 bg-red-600 text-white py-3 px-4 rounded-lg hover:bg-red-700 transition-colors font-medium"
-                                onClick={() => {
-                                    console.log('[GameBoard] Clicou em INVÁLIDA');
-                                    handleValidateAnswer(false);
-                                }}
-                            >
-                                ❌ Inválida
-                            </button>
-                        </div>
-
+                    <div className="flex gap-4">
                         <button
-                            className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                            className="flex-1 bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition-colors font-medium"
                             onClick={() => {
-                                console.log('[GameBoard] Clicou em REVELAR');
-                                handleRevealAnswer();
+                                console.log('[GameBoard] Clicou em VÁLIDA');
+                                handleValidateAnswer(true);
                             }}
-                            disabled={isRevealing}
                         >
-                            {isRevealing ? '⏳ Revelando...' : '👁️ Revelar Resposta'}
+                            ✅ Válida
                         </button>
-                    </>
+                        <button
+                            className="flex-1 bg-red-600 text-white py-3 px-4 rounded-lg hover:bg-red-700 transition-colors font-medium"
+                            onClick={() => {
+                                console.log('[GameBoard] Clicou em INVÁLIDA');
+                                handleValidateAnswer(false);
+                            }}
+                        >
+                            ❌ Inválida
+                        </button>
+                    </div>
                 )}
 
+                {/* Para espectadores: apenas texto informativo */}
                 {!validationData.isValidator && (
                     <div className="text-center text-gray-600 text-sm">
                         <p>Aguardando validação de <strong>{validationData.validatorNickname}</strong></p>
                     </div>
                 )}
-
-                <div className="text-xs text-gray-400 border-t pt-2">
-                  <details>
-                    <summary>Debug Info</summary>
-                    <pre>{JSON.stringify({
-                      isValidator: validationData.isValidator,
-                      validatorId: validationData.validatorId,
-                      myUserId: socket.userId,
-                      showResult: validationData.showResult,
-                      isAdmin: isAdmin
-                    }, null, 2)}</pre>
-                  </details>
-                </div>
               </div>
             </Modal>
           )}

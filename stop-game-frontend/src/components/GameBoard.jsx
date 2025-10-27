@@ -514,6 +514,30 @@ function GameBoard({
       }
     };
 
+    // ✅ ADICIONAR: Handler para validação cancelada
+    const handleValidationCancelled = (data) => {
+      console.log('[GameBoard] ⚠️ Validação cancelada:', data);
+      
+      setShowModal(false);
+      setValidationData(null);
+      setIsValidating(false);
+      
+      // Mostrar alerta sobre cancelamento
+      if (setAlertState) {
+        setAlertState({
+          show: true,
+          message: `Validação cancelada: ${data.reason}`,
+          type: 'warning'
+        });
+      }
+      
+      // Após 3 segundos, tentar finalizar a rodada
+      setTimeout(() => {
+        setShowRoundResult(true);
+        setRoundScore(0); // Pontuação padrão quando validação falha
+      }, 3000);
+    };
+
     // Registrar listeners
     socket.on('room_config', handleRoomConfig);
     socket.on('themes_updated', handleThemesUpdated);
@@ -529,6 +553,7 @@ function GameBoard({
     socket.on("game_ended", handleGameEnded);
     socket.on("no_answers_to_validate", handleNoAnswersToValidate);
     socket.on("reveal", handleReveal);
+    socket.on("validation_cancelled", handleValidationCancelled);
 
     // Cleanup
     return () => {
@@ -546,6 +571,7 @@ function GameBoard({
       socket.off("game_ended", handleGameEnded);
       socket.off("no_answers_to_validate", handleNoAnswersToValidate);
       socket.off("reveal", handleReveal);
+      socket.off("validation_cancelled", handleValidationCancelled);
     };
   }, [room, setRoomThemes, roomThemes, answersSubmitted, handleValidationCompleteForPlayer, handleGameEnded, handleNoAnswersToValidate, userId, validationData]);
 

@@ -20,6 +20,7 @@ function GameBoard({
   handleSaveRoom,
   alertState,
   setAlertState,
+  validationState, // ✅ NOVO: Receber estado de validação
 }) {
   const [answers, setAnswers] = useState([]);
   const [totalPoints, setTotalPoints] = useState(null);
@@ -46,6 +47,9 @@ function GameBoard({
   const [isSaved, setIsSaved] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   
+  // ✅ ADICIONAR: Estado para mostrar botão de retomar validação
+  const [showResumeButton, setShowResumeButton] = useState(false);
+
   const maxThemes = 20;
 
   // Temas padrão
@@ -458,12 +462,15 @@ function GameBoard({
       console.log('[GameBoard] 🎯 UserId final usado:', myUserId);
       console.log('[GameBoard] 🎯 Sou o validador?', myUserId === data.validatorId);
       
+      // ✅ Atualizar dados de validação
       setValidationData({
         ...data,
         isValidator: myUserId === data.validatorId,
         myUserId: myUserId
       });
+      
       setShowModal(true);
+      setShowResumeButton(false); // ✅ Esconder botão quando modal abre
     };
 
     const handleAnswerValidated = (data) => {
@@ -493,7 +500,8 @@ function GameBoard({
       console.log('[GameBoard] 🏁 Validação completa:', data);
       
       setShowModal(false);
-      setValidationData(null);
+      setValidationData(null); // ✅ Apenas aqui limpar os dados
+      setShowResumeButton(false); // ✅ E esconder o botão
       
       if (data.allAnswers) {
         console.log('[GameBoard] 📝 Mantendo respostas visíveis após validação');
@@ -538,7 +546,21 @@ function GameBoard({
       }, 3000);
     };
 
-    // Registrar listeners
+    // ✅ ADICIONAR: Handler para erros de validação
+    const handleValidationError = (error) => {
+        console.error('[GameBoard] Erro de validação:', error);
+        setShowResumeButton(false);
+        
+        // Mostrar erro para o usuário
+        if (setAlertState) {
+            setAlertState({
+                isVisible: true,
+                message: error.message || 'Erro ao retomar validação',
+                type: 'error'
+            });
+        }
+    };
+
     socket.on('room_config', handleRoomConfig);
     socket.on('themes_updated', handleThemesUpdated);
     socket.on('room_saved_success', handleRoomSaved);
@@ -554,6 +576,7 @@ function GameBoard({
     socket.on("no_answers_to_validate", handleNoAnswersToValidate);
     socket.on("reveal", handleReveal);
     socket.on("validation_cancelled", handleValidationCancelled);
+    socket.on('validation_error', handleValidationError);
 
     // Cleanup
     return () => {
@@ -572,8 +595,9 @@ function GameBoard({
       socket.off("no_answers_to_validate", handleNoAnswersToValidate);
       socket.off("reveal", handleReveal);
       socket.off("validation_cancelled", handleValidationCancelled);
+      socket.off('validation_error', handleValidationError);
     };
-  }, [room, setRoomThemes, roomThemes, answersSubmitted, handleValidationCompleteForPlayer, handleGameEnded, handleNoAnswersToValidate, userId, validationData]);
+  }, [socket, room, setRoomThemes, roomThemes, answersSubmitted, handleValidationCompleteForPlayer, handleGameEnded, handleNoAnswersToValidate, userId, validationData]);
 
   // ✅ useEffect para configuração inicial
   useEffect(() => {
@@ -583,9 +607,90 @@ function GameBoard({
     }
   }, [room]);
 
+  // ✅ ADICIONAR: useEffect para detectar validação em progresso
+  useEffect(() => {
+    // Verificar se há validação em progresso e se sou o validador
+    console.log('[GameBoard] 🔍 Verificando estado de validação:', {
+      validationState,
+      showModal,
+      userId,
+      validationData
+    });
+
+    // ✅ NOVA LÓGICA: Mostrar botão se:
+    // 1. Há validação em progresso no estado global (validationState)
+    // 2. Sou o validador
+    // 3. A modal não está aberta OU há dados de validação disponíveis
+    const shouldShowButton = (
+      validationState?.isValidating && 
+      validationState?.isValidator && 
+      !showModal
+    ) || (
+      validationData && 
+      validationData.isValidator && 
+      !showModal
+    );
+
+    if (shouldShowButton) {
+      console.log('[GameBoard] 🔍 Validação em progresso detectada - mostrando botão de retomar');
+      setShowResumeButton(true);
+    } else {
+      setShowResumeButton(false);
+    }
+  }, [validationState, showModal, userId, validationData]);
+
+  // ✅ ADICIONAR: Função para retomar validação
+  const handleResumeValidation = useCallback(() => {
+    console.log('[GameBoard] 🔄 Retomando validação...');
+    
+    if (!socket || !room) {
+      console.error('[GameBoard] Socket ou sala não disponível');
+      return;
+    }
+
+    // ✅ Se há dados de validação, apenas reabrir a modal
+    if (validationData && validationData.isValidator) {
+      console.log('[GameBoard] 📱 Reabrindo modal com dados existentes');
+      setShowModal(true);
+      setShowResumeButton(false);
+      return;
+    }
+
+    // ✅ Se não há dados, solicitar retomada do servidor
+    console.log('[GameBoard] 📡 Solicitando retomada da validação ao servidor');
+    socket.emit('resume_validation', { 
+      room, 
+      userId 
+    });
+    setShowResumeButton(false);
+  }, [socket, room, userId, validationData]);
+
   // ✅ Render principal
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
+      {/* ✅ ADICIONAR: Botão "Voltar à correção" */}
+      {showResumeButton && (
+        <div className="mb-4 p-4 bg-orange-100 border border-orange-300 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-orange-800">
+                🔍 Validação em Progresso
+              </h3>
+              <p className="text-orange-700 text-sm">
+                Você é o validador e há uma correção em andamento.
+              </p>
+            </div>
+            <button
+              onClick={handleResumeValidation}
+              className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg font-medium transition-colors duration-200 flex items-center gap-2"
+            >
+              <span>🎯</span>
+              Voltar à correção
+            </button>
+          </div>
+        </div>
+      )}
+
       {letter && roundStarted && !roundEnded && (
         <div className="text-3xl text-center font-bold text-blue-700 mb-4 select-none dark:text-blue-400">
           Letra da rodada: <span className="text-5xl">{letter}</span>
@@ -803,9 +908,19 @@ function GameBoard({
             <Modal 
               isOpen={showModal} 
               onClose={() => {
+                console.log('[GameBoard] 🔒 Fechando modal de validação');
+                
+                // ✅ IMPORTANTE: Apenas fechar modal, mas preservar validationData
+                setShowModal(false);
+                
+                // ✅ NÃO limpar validationData para que o botão apareça
+                // setValidationData(null); // ❌ REMOVER esta linha
+                
+                // ✅ Se é o validador, mostrar botão após fechar
                 if (validationData.isValidator) {
-                  setShowModal(false);
-                  setValidationData(null);
+                  setTimeout(() => {
+                    setShowResumeButton(true);
+                  }, 100);
                 }
               }}
             >

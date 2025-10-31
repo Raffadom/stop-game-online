@@ -4,6 +4,7 @@ import Home from './components/Home';
 import Room from './components/Room';
 import { v4 as uuidv4 } from 'uuid';
 import './App.css';
+import { useSessionPersistence } from "./hooks/useSessionPersistence";
 
 function App() {
   const [currentPage, setCurrentPage] = useState('home');
@@ -31,225 +32,442 @@ function App() {
     type: ''
   });
 
+  // ✅ ADICIONAR: Estados que estão faltando
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [validationState, setValidationState] = useState(null);
+
   const timerRef = useRef(null);
   const [timeLeft, setTimeLeft] = useState(0);
 
-  // ✅ Inicializar userId
-  useEffect(() => {
-    let storedUserId = localStorage.getItem('userId');
-    if (!storedUserId) {
-      storedUserId = uuidv4();
-      localStorage.setItem('userId', storedUserId);
-    }
-    setUserId(storedUserId);
-    
-    // ✅ Conectar socket com userId
-    if (socket && !socket.connected) {
-      socket.auth = { userId: storedUserId };
-      socket.connect();
-    }
-  }, []);
+  // ✅ ADICIONAR: Hook de persistência
+  const { 
+    sessionData, 
+    saveSession, 
+    loadSession, 
+    clearSession,
+    saveValidationState,    
+    loadValidationState,    
+    clearValidationState    
+  } = useSessionPersistence();
 
-  // ✅ Função para entrar/criar sala
-  const handleJoinOrCreateRoom = useCallback((roomName, nickname, isCreating = false) => {
-    if (!roomName?.trim() || !nickname?.trim()) {
-      console.log('[App] Nome da sala e nickname são obrigatórios');
-      setRoomError('Nome da sala e nickname são obrigatórios');
-      return;
-    }
-
-    const trimmedRoomName = roomName.trim();
-    const trimmedNickname = nickname.trim();
-    
-    console.log('[App] Tentando', isCreating ? 'criar' : 'entrar na', 'sala:', trimmedRoomName);
-    
-    // ✅ Atualizar estados locais
-    setNickname(trimmedNickname);
-    setRoomName(trimmedRoomName);
-    setRoomError('');
-
-    try {
-      if (isCreating) {
-        socket.emit("create_room", { 
-          room: trimmedRoomName,
-          nickname: trimmedNickname,
-          userId: userId
-        });
-      } else {
-        socket.emit("join_room", { 
-          room: trimmedRoomName,
-          nickname: trimmedNickname,
-          userId: userId
-        });
-      }
-    } catch (error) {
-      console.error('[App] Erro ao emitir evento:', error);
-      setRoomError('Erro ao conectar com o servidor');
-    }
-  }, [userId]);
-
-  // ✅ Handlers para eventos de sala
+  // ✅ DEFINIR: Todas as funções de handler que estão faltando
   const handleRoomJoined = useCallback((data) => {
-    console.log('[App] Room joined:', data);
+    console.log('[App] Entrou na sala:', data);
     
-    if (data.room && data.player && data.players) {
-      setRoomName(data.room);
-      setCurrentPage('room');
-      setNickname(data.player.nickname);
-      setIsAdmin(data.player.isCreator);
-      setPlayersInRoom(data.players);
-      setRoomError('');
-      
-      console.log('[App] Estado atualizado - Room:', data.room, 'Admin:', data.player.isCreator);
-    }
-  }, []);
+    setCurrentPage('room');
+    setPlayersInRoom(data.players || []);
+    setIsAdmin(data.player?.isCreator || false);
+    setIsReconnecting(false);
+    
+    // Salvar sessão
+    saveSession({
+      userId: userId,
+      nickname: nickname,
+      roomName: roomName,
+      isAdmin: data.player?.isCreator || false
+    });
+  }, [userId, nickname, roomName, saveSession]);
 
   const handleRoomCreated = useCallback((data) => {
-    console.log('[App] Room created:', data);
+    console.log('[App] Sala criada:', data);
     
-    if (data.room) {
-      setRoomName(data.room);
-      setCurrentPage('room');
-      setIsAdmin(true);
-      setRoomError('');
-      
-      if (data.themes) {
-        setRoomThemes(data.themes);
-      }
-    }
+    setCurrentPage('room');
+    setPlayersInRoom(data.players || []);
+    setIsAdmin(true);
+    setIsReconnecting(false);
+    
+    // Salvar sessão
+    saveSession({
+      userId: userId,
+      nickname: nickname,
+      roomName: roomName,
+      isAdmin: true
+    });
+  }, [userId, nickname, roomName, saveSession]);
+
+  const handleRoomError = useCallback((error) => {
+    console.error('[App] Erro da sala:', error);
+    setRoomError(error.message || 'Erro desconhecido');
+    setIsReconnecting(false);
   }, []);
 
-  const handleRoomError = useCallback((data) => {
-    console.log('[App] Room error:', data);
-    setRoomError(data.message || 'Erro desconhecido');
-    setAlertState({
-      isVisible: true,
-      message: data.message || 'Erro desconhecido',
-      type: 'error'
-    });
-  }, []);
-
-  // ✅ Outros handlers
-  const handleError = useCallback((error) => {
-    console.error('[App] Socket error:', error);
-    setRoomError(error.message || 'Erro de conexão');
-    setAlertState({
-      isVisible: true,
-      message: error.message || 'Erro de conexão',
-      type: 'error'
-    });
+  const handlePlayersUpdate = useCallback((players) => {
+    console.log('[App] Lista de jogadores atualizada:', players);
+    setPlayersInRoom(players || []);
   }, []);
 
   const handleRoundStartCountdown = useCallback((data) => {
-    console.log('[App] Countdown received:', data.countdown);
+    console.log('[App] Countdown iniciado:', data);
     setCountdown(data.countdown);
+    setRoomError('');
   }, []);
 
   const handleRoundStarted = useCallback((data) => {
-    console.log('[App] Round started with letter:', data.letter);
+    console.log('[App] Rodada iniciada:', data);
+    
     setRoundStarted(true);
     setRoundEnded(false);
-    setLetter(data.letter);
+    setLetter(data.letter || '');
     setCountdown(null);
     setStopClickedByMe(false);
+    
+    // Iniciar timer
+    if (data.duration) {
+      setTimeLeft(data.duration);
+      
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      
+      timerRef.current = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            clearInterval(timerRef.current);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
   }, []);
 
-  const handleRoundEnded = useCallback(() => {
-    console.log('[App] Round ended');
+  const handleRoundEnded = useCallback((data) => {
+    console.log('[App] Rodada finalizada:', data);
+    
     setRoundStarted(false);
     setRoundEnded(true);
     setStopClickedByMe(false);
-  }, []);
-
-  const handleTimeUpRoundEnded = useCallback(() => {
-    console.log('[App] ⏰ Tempo esgotado - finalizando rodada');
-    setRoundEnded(true);
-    setRoundStarted(false);
     
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    setTimeLeft(0);
   }, []);
 
-  const handleNewRoundStarted = useCallback(() => {
-    console.log('[App] New round started');
+  const handleTimeUpRoundEnded = useCallback((data) => {
+    console.log('[App] Tempo esgotado:', data);
+    
+    setRoundStarted(false);
+    setRoundEnded(true);
+    setStopClickedByMe(false);
+    
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    setAlertState({
+      isVisible: true,
+      message: 'Tempo esgotado!',
+      type: 'warning'
+    });
+  }, []);
+
+  const handleNewRoundStarted = useCallback((data) => {
+    console.log('[App] Nova rodada iniciada:', data);
+    
+    setRoundStarted(true);
+    setRoundEnded(false);
+    setLetter(data.letter || '');
+    setStopClickedByMe(false);
+    setResetRoundFlag(prev => prev + 1);
+    
+    // Reiniciar timer
+    if (data.duration) {
+      setTimeLeft(data.duration);
+      
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      
+      timerRef.current = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            clearInterval(timerRef.current);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+  }, []);
+
+  const handleRoomConfig = useCallback((config) => {
+    console.log('[App] Configuração da sala recebida:', config);
+    
+    setRoomThemes(config.themes || []);
+    setRoomDuration(config.duration || 180);
+    setRoundStarted(config.roundActive || false);
+    setRoundEnded(config.roundEnded || false);
+    setLetter(config.currentLetter || '');
+    setIsRoomSaved(config.isSaved || false);
+  }, []);
+
+  const handleRoomSavedSuccess = useCallback((data) => {
+    console.log('[App] Sala salva com sucesso:', data);
+    
+    setIsRoomSaved(true);
+    setAlertState({
+      isVisible: true,
+      message: 'Sala salva com sucesso!',
+      type: 'success'
+    });
+  }, []);
+
+  const handleGameEnded = useCallback((data) => {
+    console.log('[App] Jogo finalizado:', data);
+    
+    setRoundStarted(false);
+    setRoundEnded(false);
+    
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    setAlertState({
+      isVisible: true,
+      message: 'Jogo finalizado!',
+      type: 'info'
+    });
+  }, []);
+
+  const handleError = useCallback((error) => {
+    console.error('[App] Erro geral:', error);
+    
+    setAlertState({
+      isVisible: true,
+      message: error.message || 'Erro desconhecido',
+      type: 'error'
+    });
+  }, []);
+
+  const handlePlayerReconnected = useCallback((data) => {
+    console.log('[App] Jogador reconectado:', data);
+    
+    setAlertState({
+      isVisible: true,
+      message: `${data.nickname} reconectou-se`,
+      type: 'info'
+    });
+  }, []);
+
+  const handlePlayerDisconnected = useCallback((data) => {
+    console.log('[App] Jogador desconectado:', data);
+    
+    setAlertState({
+      isVisible: true,
+      message: `${data.nickname} desconectou-se`,
+      type: 'warning'
+    });
+  }, []);
+
+  // ✅ MANTER: Funções já definidas
+  const handleValidationStarted = useCallback((data) => {
+    console.log('[App] Validação iniciada - salvando estado:', data);
+    
+    const validationData = {
+      isValidating: true,
+      currentValidation: data,
+      roomName: roomName,
+      userId: userId,
+      isValidator: data.validatorId === userId
+    };
+    
+    setValidationState(validationData);
+    saveValidationState(validationData);
+  }, [roomName, userId, saveValidationState]);
+
+  const handleValidationComplete = useCallback(() => {
+    console.log('[App] Validação completa - limpando estado');
+    setValidationState(null);
+    clearValidationState();
+  }, [clearValidationState]);
+
+  const handleLeaveRoom = useCallback(() => {
+    console.log('[App] Saindo da sala e limpando sessão');
+    
+    // Limpar timers
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    // Limpar sessão e validação
+    clearSession();
+    clearValidationState();
+    
+    // Resetar todos os estados
+    setCurrentPage('home');
+    setRoomName('');
+    setNickname('');
+    setRoomError('');
+    setPlayersInRoom([]);
+    setIsAdmin(false);
+    setRoomThemes([]);
     setRoundStarted(false);
     setRoundEnded(false);
     setLetter('');
     setCountdown(null);
     setStopClickedByMe(false);
-  }, []);
+    setIsRoomSaved(false);
+    setIsReconnecting(false);
+    setValidationState(null);
+    setTimeLeft(0);
+    
+    // Emitir leave_room se estiver conectado
+    if (socket.connected) {
+      socket.emit('leave_room', {
+        userId,
+        room: roomName
+      });
+    }
+  }, [userId, roomName, clearSession, clearValidationState]);
 
-  const handleRoomSavedSuccess = useCallback(() => {
-    console.log('[App] Room saved successfully');
-    setIsRoomSaved(true);
-    setAlertState({
-      isVisible: true,
-      message: "Sala salva com sucesso!",
-      type: "success"
-    });
-  }, []);
+  // ✅ ADICIONAR: Função handleJoinOrCreateRoom (estava faltando)
+  const handleJoinOrCreateRoom = useCallback((data) => {
+    console.log('[App] Tentando entrar/criar sala:', data);
+    
+    const { action, roomId, nickname: inputNickname } = data;
+    
+    // Validações básicas
+    if (!inputNickname?.trim()) {
+      setRoomError('Nickname é obrigatório');
+      return;
+    }
+    
+    if (!roomId?.trim()) {
+      setRoomError('Nome da sala é obrigatório');
+      return;
+    }
+    
+    // Gerar userId se não existir
+    if (!userId) {
+      const newUserId = uuidv4();
+      setUserId(newUserId);
+    }
+    
+    // Limpar erros anteriores
+    setRoomError('');
+    
+    // Definir estados
+    setNickname(inputNickname.trim());
+    setRoomName(roomId.trim());
+    
+    // Emitir evento baseado na ação
+    if (action === 'create') {
+      console.log('[App] Criando nova sala:', roomId);
+      socket.emit('create_room', {
+        userId: userId || uuidv4(),
+        nickname: inputNickname.trim(),
+        room: roomId.trim()
+      });
+    } else if (action === 'join') {
+      console.log('[App] Entrando na sala:', roomId);
+      socket.emit('join_room', {
+        userId: userId || uuidv4(),
+        nickname: inputNickname.trim(),
+        room: roomId.trim(),
+        isReconnecting: false
+      });
+    }
+  }, [userId]);
 
-  const handlePlayersUpdate = useCallback((players) => {
-    console.log('[App] Players update received:', players);
-    setPlayersInRoom(players);
-  }, []);
-
-  const handleRoomConfig = useCallback((config) => {
-    console.log('[App] Room config received:', config);
-    
-    if (config.themes && Array.isArray(config.themes)) {
-      setRoomThemes(config.themes);
-    }
-    
-    if (config.duration) {
-      setRoomDuration(config.duration);
-    }
-    
-    if (typeof config.roundActive === 'boolean') {
-      setRoundStarted(config.roundActive);
-    }
-    
-    if (typeof config.roundEnded === 'boolean') {
-      setRoundEnded(config.roundEnded);
-    }
-    
-    if (config.currentLetter) {
-      setLetter(config.currentLetter);
-    }
-    
-    if (typeof config.isSaved === 'boolean') {
-      setIsRoomSaved(config.isSaved);
-    }
-  }, []);
-
-  // ✅ ADICIONAR: Handler para fim de jogo
-  const handleGameEnded = useCallback((data) => {
-    console.log('[App] 🏁 Jogo finalizado:', data);
-    
-    // ✅ Não fazer nada aqui - deixar o GameBoard processar
-    // O GameBoard já tem lógica para mostrar finalRanking
-  }, []);
-
-  // ✅ Socket listeners (adicionar na lista)
+  // ✅ ADICIONAR: useEffect para gerar userId inicial
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      const newUserId = uuidv4();
+      setUserId(newUserId);
+      console.log('[App] Novo userId gerado:', newUserId);
+    }
+  }, [userId]);
 
+  // ✅ MANTER: handleReconnection (já existe, mas precisa estar antes do useEffect)
+  const handleReconnection = useCallback((session) => {
+    console.log('[App] Tentando reconexão automática:', session);
+    
+    socket.emit('join_room', {
+      userId: session.userId,
+      nickname: session.nickname,
+      room: session.roomName,
+      isReconnecting: true
+    });
+    
+    // Timeout para reconexão
+    setTimeout(() => {
+      setIsReconnecting(false);
+    }, 5000);
+  }, []);
+
+  // ✅ useEffect para reconexão (DEPOIS de handleReconnection)
+  useEffect(() => {
+    const session = loadSession();
+    const validation = loadValidationState();
+    
+    if (session && session.roomName && session.userId && session.nickname) {
+      console.log('[App] Detectada sessão anterior - tentando reconectar:', session);
+      
+      if (validation) {
+        console.log('[App] Detectado estado de validação anterior:', validation);
+        setValidationState(validation);
+      }
+      
+      setIsReconnecting(true);
+      
+      // Restaurar estados básicos
+      setUserId(session.userId);
+      setNickname(session.nickname);
+      setRoomName(session.roomName);
+      setIsAdmin(session.isAdmin || false);
+      
+      // Tentar reconexão automática
+      setTimeout(() => {
+        handleReconnection(session);
+      }, 1000);
+    }
+  }, [loadSession, loadValidationState, handleReconnection]);
+
+  // ✅ ADICIONAR: useEffect para conexão inicial do socket
+  useEffect(() => {
     const handleConnect = () => {
-      console.log('Conectado ao servidor');
+      console.log('[Socket] Conectado ao servidor');
       setIsConnected(true);
     };
 
     const handleDisconnect = () => {
-      console.log('Desconectado do servidor');
+      console.log('[Socket] Desconectado do servidor');
       setIsConnected(false);
     };
 
-    // Registrar listeners
+    const handleConnectError = (error) => {
+      console.error('[Socket] Erro de conexão:', error);
+      setIsConnected(false);
+    };
+
+    // Registrar listeners de conexão
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
+    socket.on('connect_error', handleConnectError);
+
+    // Verificar status inicial
+    if (socket.connected) {
+      setIsConnected(true);
+    }
+
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('connect_error', handleConnectError);
+    };
+  }, []);
+
+  // ✅ Socket listeners (MANTÉM o useEffect existente)
+  useEffect(() => {
+    if (!userId) return;
+
+    console.log(`[App] Setting up socket listeners for user ${userId}`);
+
+    // Registrar listeners
     socket.on('room_joined', handleRoomJoined);
     socket.on('room_created', handleRoomCreated);
     socket.on('room_error', handleRoomError);
@@ -261,12 +479,15 @@ function App() {
     socket.on('new_round_started', handleNewRoundStarted);
     socket.on('room_config', handleRoomConfig);
     socket.on('room_saved_success', handleRoomSavedSuccess);
-    socket.on('game_ended', handleGameEnded); // ✅ ADICIONAR
+    socket.on('game_ended', handleGameEnded);
     socket.on('error', handleError);
+    socket.on('player_reconnected', handlePlayerReconnected);
+    socket.on('player_disconnected', handlePlayerDisconnected);
+    socket.on('start_validation', handleValidationStarted);
+    socket.on('validation_complete', handleValidationComplete);
 
     return () => {
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
+      console.log('[App] Cleaning up socket listeners');
       socket.off('room_joined', handleRoomJoined);
       socket.off('room_created', handleRoomCreated);
       socket.off('room_error', handleRoomError);
@@ -278,12 +499,12 @@ function App() {
       socket.off('new_round_started', handleNewRoundStarted);
       socket.off('room_config', handleRoomConfig);
       socket.off('room_saved_success', handleRoomSavedSuccess);
-      socket.off('game_ended', handleGameEnded); // ✅ ADICIONAR
+      socket.off('game_ended', handleGameEnded);
       socket.off('error', handleError);
-      
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+      socket.off('player_reconnected', handlePlayerReconnected);
+      socket.off('player_disconnected', handlePlayerDisconnected);
+      socket.off('start_validation', handleValidationStarted);
+      socket.off('validation_complete', handleValidationComplete);
     };
   }, [
     userId,
@@ -298,32 +519,35 @@ function App() {
     handleNewRoundStarted,
     handleRoomConfig,
     handleRoomSavedSuccess,
-    handleGameEnded, // ✅ ADICIONAR
-    handleError
+    handleGameEnded,
+    handleError,
+    handlePlayerReconnected,
+    handlePlayerDisconnected,
+    handleValidationStarted,
+    handleValidationComplete
   ]);
 
-  // ✅ Funções de controle
-  const handleLeaveRoom = useCallback(() => {
-    setCurrentPage('home');
-    setRoomName('');
-    setNickname('');
-    setRoomError('');
-    setPlayersInRoom([]);
-    setIsAdmin(false);
-    setRoomThemes([]);
-    setRoundStarted(false);
-    setRoundEnded(false);
-    setLetter('');
-    setCountdown(null);
-    setStopClickedByMe(false);
-    setIsRoomSaved(false);
-    
-    socket.emit('leave_room', {
-      userId,
-      room: roomName
-    });
-  }, [userId, roomName]);
+  // ✅ Detectar mudanças de visibilidade para reconectar
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && sessionData && sessionData.roomName) {
+        console.log('[App] Página voltou a ficar visível - verificando conexão');
+        
+        if (!socket.connected) {
+          console.log('[App] Socket desconectado - tentando reconectar');
+          socket.connect();
+        }
+      }
+    };
 
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [sessionData]);
+
+  // ✅ Funções de controle
   const handleStartRound = useCallback(() => {
     socket.emit('start_round', { room: roomName });
   }, [roomName]);
@@ -342,9 +566,34 @@ function App() {
     setResetRoundFlag(prev => prev + 1);
   }, []);
 
+  // ✅ ADICIONAR: Função para iniciar validação
+  const handleStartValidation = useCallback(() => {
+    console.log('[App] Iniciando validação');
+    socket.emit('start_validation', { room: roomName });
+  }, [roomName]);
+
   return (
     <div className="App" data-testid="app-container">
-      {currentPage === 'home' && (
+      {isReconnecting && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-lg font-semibold text-gray-700">
+              Reconectando na sala...
+            </p>
+            <p className="text-sm text-gray-500 mt-2">
+              Sala: {roomName}
+            </p>
+            {validationState && (
+              <p className="text-sm text-orange-600 mt-1">
+                🎯 Retomando validação...
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+      
+      {currentPage === 'home' && !isReconnecting && (
         <div data-testid="home-page">
           <Home 
             onJoinOrCreateRoom={handleJoinOrCreateRoom}
@@ -354,7 +603,7 @@ function App() {
         </div>
       )}
       
-      {currentPage === 'room' && (
+      {currentPage === 'room' && !isReconnecting && (
         <div data-testid="room-page">
           <Room 
             userId={userId}
@@ -380,6 +629,8 @@ function App() {
             handleSaveRoom={handleSaveRoom}
             alertState={alertState}
             setAlertState={setAlertState}
+            validationState={validationState}
+            timeLeft={timeLeft} // ✅ ADICIONAR: Passar timeLeft para Room
           />
         </div>
       )}

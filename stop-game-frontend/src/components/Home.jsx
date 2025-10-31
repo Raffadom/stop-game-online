@@ -19,8 +19,9 @@ export default function Home({ onJoinOrCreateRoom, roomError, isConnected }) {
     // A prop `onJoinOrCreateRoom` do App.jsx já vai ter acesso ao userId correto.
   }, []);
 
+  // ✅ CORRIGIR: A função handleJoin deve passar um objeto com as propriedades corretas
   const handleJoin = () => {
-    console.log("handleJoin foi chamado! (Teste de clique)");
+    console.log('handleJoin foi chamado! (Teste de clique)');
     setLocalError(""); // Limpa erro anterior
 
     const trimmedNickname = nickname ? nickname.trim() : '';
@@ -33,8 +34,29 @@ export default function Home({ onJoinOrCreateRoom, roomError, isConnected }) {
     const selectedRoom = joinCode ? joinCode.trim() : '';
     const finalRoomName = selectedRoom || trimmedNickname.toLowerCase().replace(/\s/g, '-');
 
-    onJoinOrCreateRoom(finalRoomName, trimmedNickname);
-    console.log(`Emitindo join_room para: ${finalRoomName}, ${trimmedNickname}`);
+    // ✅ CORRIGIR: Passar objeto com estrutura esperada pelo App.jsx
+    const roomData = {
+      action: 'join',        // ✅ ADICIONAR: Especificar ação
+      roomId: finalRoomName,    // ✅ NOME DA SALA
+      nickname: trimmedNickname     // ✅ NICKNAME DO USUÁRIO
+    };
+    
+    console.log('Dados sendo enviados para onJoinOrCreateRoom:', roomData);
+    onJoinOrCreateRoom(roomData); // ✅ CORRIGIR: Passar objeto completo
+  };
+
+  const handleCreate = () => {
+    console.log('handleCreate foi chamado!');
+    
+    // ✅ CORRIGIR: Passar objeto com estrutura esperada pelo App.jsx  
+    const roomData = {
+      action: 'create',      // ✅ ADICIONAR: Especificar ação
+      roomId: joinCode,  // ✅ NOME DA SALA
+      nickname: nickname     // ✅ NICKNAME DO USUÁRIO
+    };
+    
+    console.log('Dados sendo enviados para onJoinOrCreateRoom:', roomData);
+    onJoinOrCreateRoom(roomData); // ✅ CORRIGIR: Passar objeto completo
   };
 
   return (

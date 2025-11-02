@@ -35,6 +35,12 @@ function App() {
   // ✅ ADICIONAR: Estados que estão faltando
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [validationState, setValidationState] = useState(null);
+  
+  // ✅ NOVO: Estado global para o tema
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = localStorage.getItem('theme');
+    return savedTheme ? savedTheme : 'light';
+  });
 
   const timerRef = useRef(null);
   const [timeLeft, setTimeLeft] = useState(0);
@@ -382,6 +388,21 @@ function App() {
     }
   }, [userId]);
 
+  // ✅ NOVO: useEffect para aplicar tema globalmente
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  // ✅ NOVO: função para alternar tema globalmente
+  const toggleTheme = useCallback(() => {
+    setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
+  }, []);
+
   // ✅ MANTER: handleReconnection (já existe, mas precisa estar antes do useEffect)
   const handleReconnection = useCallback((session) => {
     console.log('[App] Tentando reconexão automática:', session);
@@ -599,6 +620,8 @@ function App() {
             onJoinOrCreateRoom={handleJoinOrCreateRoom}
             roomError={roomError}
             isConnected={isConnected}
+            theme={theme}
+            toggleTheme={toggleTheme}
           />
         </div>
       )}
@@ -631,6 +654,8 @@ function App() {
             setAlertState={setAlertState}
             validationState={validationState}
             timeLeft={timeLeft} // ✅ ADICIONAR: Passar timeLeft para Room
+            theme={theme}
+            toggleTheme={toggleTheme}
           />
         </div>
       )}

@@ -58,22 +58,10 @@ export default function Room({
   handleSaveRoom,
   alertState,
   setAlertState,
+  theme,
+  toggleTheme,
 }) {
   const [showCopiedMessage, setShowCopiedMessage] = useState(false);
-  const [theme, setTheme] = useState(() => {
-    const savedTheme = localStorage.getItem('theme');
-    return savedTheme ? savedTheme : 'light';
-  });
-
-  useEffect(() => {
-    const root = window.document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-    localStorage.setItem('theme', theme);
-  }, [theme]);
 
   useEffect(() => {
     if (alertState.isVisible) {
@@ -83,10 +71,6 @@ export default function Room({
       return () => clearTimeout(timer);
     }
   }, [alertState, setAlertState]);
-
-  const toggleTheme = () => {
-    setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
-  };
 
   const handleShareRoomLink = () => {
     const roomLink = `${window.location.origin}/room/${room}`;

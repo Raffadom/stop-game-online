@@ -2,8 +2,10 @@ import { useState, useEffect } from "react";
 import { socket } from "../socket";
 import { v4 as uuidv4 } from 'uuid'; // Importe uuid para gerar IDs únicos
 
+import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
+
 // As props agora incluem onJoinOrCreateRoom, roomError e isConnected do App.jsx
-export default function Home({ onJoinOrCreateRoom, roomError, isConnected }) {
+export default function Home({ onJoinOrCreateRoom, roomError, isConnected, theme, toggleTheme }) {
   const [nickname, setNickname] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [localError, setLocalError] = useState(""); // Para erros de validação locais
@@ -62,6 +64,19 @@ export default function Home({ onJoinOrCreateRoom, roomError, isConnected }) {
   return (
     // Container principal: Fundo da página
     <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900 p-4" data-testid="home-container">
+      {/* Botão de Tema no canto superior direito */}
+      <button
+        onClick={toggleTheme}
+        className="absolute top-4 right-4 p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 shadow-md transition-colors duration-300 z-10"
+        title={theme === 'light' ? 'Mudar para Tema Escuro' : 'Mudar para Tema Claro'}
+      >
+        {theme === 'light' ? (
+          <MoonIcon className="h-4 w-4" />
+        ) : (
+          <SunIcon className="h-4 w-4" />
+        )}
+      </button>
+
       {/* Caixa do formulário */}
       <div className="max-w-md mx-auto bg-white p-8 rounded-2xl shadow-xl space-y-6 border border-gray-200 dark:bg-gray-800 dark:border-gray-700" data-testid="home-form-container">
         <h1 className="text-3xl font-extrabold text-center text-blue-700 dark:text-blue-400" data-testid="game-title">

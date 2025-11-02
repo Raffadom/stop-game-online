@@ -60,8 +60,21 @@ export default function Room({
   setAlertState,
   theme,
   toggleTheme,
+  excludeXWYZ,
+  setExcludeXWYZ,
 }) {
   const [showCopiedMessage, setShowCopiedMessage] = useState(false);
+
+  // ✅ Handlers para filtro de letras
+  const handleLetterFilterChange = (filterType) => {
+    if (filterType === 'all') {
+      setExcludeXWYZ(false);
+      socket.emit('update_letter_filter', { room, excludeXWYZ: false });
+    } else if (filterType === 'excludeXWYZ') {
+      setExcludeXWYZ(true);
+      socket.emit('update_letter_filter', { room, excludeXWYZ: true });
+    }
+  };
 
   useEffect(() => {
     if (alertState.isVisible) {
@@ -171,6 +184,44 @@ export default function Room({
             </button>
           )}
         </div>
+        
+        {/* ✅ Filtros de Letras (apenas para admin) */}
+        {isAdmin && (
+          <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg border border-gray-200 dark:border-gray-600">
+            <div className="flex items-center space-x-4">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Letras:
+              </span>
+              
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="letterFilter"
+                  checked={!excludeXWYZ}
+                  onChange={() => handleLetterFilterChange('all')}
+                  className="h-3 w-3 text-blue-600 focus:ring-blue-500 focus:ring-1"
+                />
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Todas as letras
+                </span>
+              </label>
+              
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="letterFilter" 
+                  checked={excludeXWYZ}
+                  onChange={() => handleLetterFilterChange('excludeXWYZ')}
+                  className="h-3 w-3 text-blue-600 focus:ring-blue-500 focus:ring-1"
+                />
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  Menos X, W, Y, Z
+                </span>
+              </label>
+            </div>
+          </div>
+        )}
+        
         <div className="text-lg font-semibold text-gray-700 dark:text-gray-300">
           Jogadores:{" "}
           <div className="inline-flex flex-wrap gap-2 ml-2">

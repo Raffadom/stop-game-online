@@ -178,7 +178,8 @@ async function saveRoomConfigToFirestore(roomId, config) {
             players: config.players || {}, // ✅ Isso deve sobrescrever completamente
             isSaved: true,
             lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-            migratedFrom: 'artifacts' // ✅ Marcar se foi migrada
+            migratedFrom: 'artifacts', // ✅ Marcar se foi migrada
+            excludeXWYZ: config.excludeXWYZ || false // ✅ NOVO: Salvar filtro de letras
         };
         
         console.log(`[Firestore] 🔍 ANTES de salvar - Jogadores na configuração:`, Object.keys(config.players || {}));
@@ -310,19 +311,28 @@ const ALL_LETTERS = [
     'U', 'V', 'W', 'X', 'Y', 'Z'
 ];
 
-// Função para sortear letra sem repetição
-function getRandomLetterForRoom(room) {
+// ✅ NOVO: Letras excluídas por configuração
+const EXCLUDED_LETTERS = ['X', 'W', 'Y', 'Z'];
+
+// ✅ MELHORADO: Função para sortear letra sem repetição com filtros
+function getRandomLetterForRoom(room, excludeXWYZ = false) {
     if (!roomLettersUsed.has(room)) {
         roomLettersUsed.set(room, []);
     }
     
+    // ✅ NOVO: Aplicar filtro de letras baseado na configuração da sala
+    let allowedLetters = [...ALL_LETTERS];
+    if (excludeXWYZ) {
+        allowedLetters = allowedLetters.filter(letter => !EXCLUDED_LETTERS.includes(letter));
+    }
+    
     const usedLetters = roomLettersUsed.get(room);
-    const availableLetters = ALL_LETTERS.filter(letter => !usedLetters.includes(letter));
+    const availableLetters = allowedLetters.filter(letter => !usedLetters.includes(letter));
     
     if (availableLetters.length === 0) {
         console.log(`[Letter System] Todas as letras foram usadas na sala ${room}. Reiniciando ciclo.`);
         roomLettersUsed.set(room, []);
-        return getRandomLetterForRoom(room);
+        return getRandomLetterForRoom(room, excludeXWYZ);
     }
     
     const randomIndex = Math.floor(Math.random() * availableLetters.length);
@@ -331,7 +341,8 @@ function getRandomLetterForRoom(room) {
     usedLetters.push(selectedLetter);
     roomLettersUsed.set(room, usedLetters);
     
-    console.log(`[Letter System] Sala ${room}: Letra sorteada '${selectedLetter}'. Letras usadas: [${usedLetters.join(', ')}]. Restantes: ${26 - usedLetters.length}`);
+    const totalAllowed = excludeXWYZ ? allowedLetters.length : ALL_LETTERS.length;
+    console.log(`[Letter System] Sala ${room}: Letra '${selectedLetter}' sorteada. Filtro XWYZ: ${excludeXWYZ ? 'Ativo' : 'Inativo'}. Usadas: [${usedLetters.join(', ')}]. Restantes: ${totalAllowed - usedLetters.length}`);
     
     return selectedLetter;
 }
@@ -386,7 +397,8 @@ function startRoundCountdown(room) {
             clearInterval(countdownInterval);
             config.isCountingDown = false;
 
-            const letter = getRandomLetterForRoom(room);
+            // ✅ NOVO: Usar filtro de letras da configuração da sala
+            const letter = getRandomLetterForRoom(room, config.excludeXWYZ);
             
             config.currentLetter = letter;
             config.roundActive = true;
@@ -790,7 +802,8 @@ io.on('connection', (socket) => {
                         roundActive: false,
                         roundEnded: false,
                         currentLetter: '',
-                        validationInProgress: false
+                        validationInProgress: false,
+                        excludeXWYZ: savedConfig.excludeXWYZ || false // ✅ NOVO: Filtro de letras
                     };
                     
                     roomConfigs[room] = roomConfig;
@@ -808,7 +821,8 @@ io.on('connection', (socket) => {
                         roundEnded: false,
                         currentLetter: '',
                         isSaved: false,
-                        validationInProgress: false
+                        validationInProgress: false,
+                        excludeXWYZ: false // ✅ NOVO: Por padrão, incluir todas as letras
                     };
                     
                     roomConfigs[room] = roomConfig;
@@ -1178,6 +1192,30 @@ io.on('connection', (socket) => {
             }
         } catch (error) {
             console.error('[Socket.io] Error updating themes:', error);
+        }
+    });
+
+    // ✅ NOVO: Handler para atualizar filtro de letras
+    socket.on('update_letter_filter', async ({ room, excludeXWYZ }) => {
+        try {
+            const config = roomConfigs[room];
+            if (!config || socket.userId !== config.creatorId) {
+                console.log(`[Socket.io] ❌ Tentativa não autorizada de alterar filtro de letras por ${socket.userId}`);
+                return;
+            }
+
+            config.excludeXWYZ = Boolean(excludeXWYZ);
+            config.isSaved = false;
+            
+            // ✅ Limpar letras usadas quando filtro muda para evitar inconsistências
+            clearRoomLetters(room);
+            
+            io.to(room).emit('letter_filter_updated', { excludeXWYZ: config.excludeXWYZ });
+            emitRoomConfig(room, config);
+            
+            console.log(`[Socket.io] ✅ Filtro de letras atualizado para sala ${room}. Excluir XWYZ: ${config.excludeXWYZ}`);
+        } catch (error) {
+            console.error('[Socket.io] ❌ Erro ao atualizar filtro de letras:', error);
         }
     });
 

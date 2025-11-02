@@ -42,6 +42,9 @@ function App() {
     return savedTheme ? savedTheme : 'light';
   });
 
+  // ✅ NOVO: Estado para filtro de letras
+  const [excludeXWYZ, setExcludeXWYZ] = useState(false);
+
   const timerRef = useRef(null);
   const [timeLeft, setTimeLeft] = useState(0);
 
@@ -207,6 +210,13 @@ function App() {
     setRoundEnded(config.roundEnded || false);
     setLetter(config.currentLetter || '');
     setIsRoomSaved(config.isSaved || false);
+    setExcludeXWYZ(config.excludeXWYZ || false); // ✅ NOVO: Filtro de letras
+  }, []);
+
+  // ✅ NOVO: Handler para atualização do filtro de letras
+  const handleLetterFilterUpdated = useCallback((data) => {
+    console.log('[App] Filtro de letras atualizado:', data);
+    setExcludeXWYZ(data.excludeXWYZ);
   }, []);
 
   const handleRoomSavedSuccess = useCallback((data) => {
@@ -506,6 +516,7 @@ function App() {
     socket.on('player_disconnected', handlePlayerDisconnected);
     socket.on('start_validation', handleValidationStarted);
     socket.on('validation_complete', handleValidationComplete);
+    socket.on('letter_filter_updated', handleLetterFilterUpdated); // ✅ NOVO
 
     return () => {
       console.log('[App] Cleaning up socket listeners');
@@ -526,6 +537,7 @@ function App() {
       socket.off('player_disconnected', handlePlayerDisconnected);
       socket.off('start_validation', handleValidationStarted);
       socket.off('validation_complete', handleValidationComplete);
+      socket.off('letter_filter_updated', handleLetterFilterUpdated); // ✅ NOVO
     };
   }, [
     userId,
@@ -545,7 +557,8 @@ function App() {
     handlePlayerReconnected,
     handlePlayerDisconnected,
     handleValidationStarted,
-    handleValidationComplete
+    handleValidationComplete,
+    handleLetterFilterUpdated // ✅ NOVO
   ]);
 
   // ✅ Detectar mudanças de visibilidade para reconectar
@@ -656,6 +669,8 @@ function App() {
             timeLeft={timeLeft} // ✅ ADICIONAR: Passar timeLeft para Room
             theme={theme}
             toggleTheme={toggleTheme}
+            excludeXWYZ={excludeXWYZ} // ✅ NOVO: Filtro de letras
+            setExcludeXWYZ={setExcludeXWYZ} // ✅ NOVO: Setter do filtro
           />
         </div>
       )}

@@ -169,19 +169,23 @@ async function saveRoomConfigToFirestore(roomId, config) {
         
         const docRef = roomsCollectionRef.doc(roomId);
         
-        // ✅ Salvar configuração COMPLETA
+        // ✅ Salvar configuração COMPLETA (SOBRESCREVER players)
         const configToSave = {
             themes: config.themes || [],
             duration: config.duration || 180,
             createdAt: config.createdAt || new Date(),
             creatorId: config.creatorId,
-            players: config.players || {},
+            players: config.players || {}, // ✅ Isso deve sobrescrever completamente
             isSaved: true,
             lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
             migratedFrom: 'artifacts' // ✅ Marcar se foi migrada
         };
         
-        await docRef.set(configToSave, { merge: true });
+        console.log(`[Firestore] 🔍 ANTES de salvar - Jogadores na configuração:`, Object.keys(config.players || {}));
+        console.log(`[Firestore] 🔍 Salvando configuração com ${Object.keys(configToSave.players).length} jogadores`);
+        
+        // ✅ CRÍTICO: NÃO usar merge para garantir que players seja sobrescrito
+        await docRef.set(configToSave);
         
         console.log(`[Firestore] ✅ Sala ${roomId} salva em /rooms/:`, {
             themes: configToSave.themes.length,
@@ -192,6 +196,27 @@ async function saveRoomConfigToFirestore(roomId, config) {
         return true;
     } catch (error) {
         console.error(`[Firestore Error] ❌ Erro ao salvar sala ${roomId}:`, error);
+        return false;
+    }
+}
+
+// ✅ NOVA: Função para forçar limpeza de jogadores órfãos no Firestore
+async function cleanOrphanPlayersFromFirestore(roomId, activePlayers) {
+    try {
+        console.log(`[Firestore] 🧹 Forçando limpeza de jogadores órfãos na sala ${roomId}`);
+        
+        const docRef = roomsCollectionRef.doc(roomId);
+        
+        // ✅ Atualizar apenas o campo players com a lista limpa
+        await docRef.update({
+            players: activePlayers,
+            lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log(`[Firestore] ✅ Jogadores órfãos limpos na sala ${roomId}. Restam: ${Object.keys(activePlayers).length}`);
+        return true;
+    } catch (error) {
+        console.error(`[Firestore] ❌ Erro ao limpar jogadores órfãos da sala ${roomId}:`, error);
         return false;
     }
 }
@@ -712,10 +737,56 @@ io.on('connection', (socket) => {
                 if (savedConfig) {
                     console.log(`[Socket.io] ✅ Configuração encontrada no Firestore:`, savedConfig);
                     
-                    // ✅ Usar configuração salva do Firestore
+                    // ✅ CRÍTICO: Verificar se jogadores salvos ainda estão conectados
+                    const savedPlayers = savedConfig.players || {};
+                    const currentTime = Date.now();
+                    const MAX_DISCONNECT_TIME = 2 * 60 * 1000; // 2 minutos (reduzido)
+                    
+                    // Filtrar apenas jogadores que ainda podem estar conectados
+                    const activePlayers = {};
+                    let removedPlayersCount = 0;
+                    
+                    console.log(`[Socket.io] 🔍 Verificando ${Object.keys(savedPlayers).length} jogadores salvos na sala ${room}`);
+                    
+                    Object.entries(savedPlayers).forEach(([playerId, player]) => {
+                        // ✅ MELHOR: Verificar se socket realmente existe e está conectado
+                        const socketExists = io.sockets.sockets.has(player.socketId);
+                        const disconnectTime = player.disconnectedAt ? (currentTime - new Date(player.disconnectedAt).getTime()) : 0;
+                        const isRecentlyDisconnected = player.disconnectedAt && disconnectTime < MAX_DISCONNECT_TIME;
+                        
+                        console.log(`[Socket.io] 🔍 Verificando ${player.nickname}:`, {
+                            socketId: player.socketId,
+                            socketExists,
+                            disconnectedAt: player.disconnectedAt,
+                            disconnectTime: Math.round(disconnectTime / 1000) + 's',
+                            isRecentlyDisconnected
+                        });
+                        
+                        // ✅ APENAS manter se socket existe OU se desconectou recentemente
+                        if (socketExists || isRecentlyDisconnected) {
+                            activePlayers[playerId] = player;
+                            console.log(`[Socket.io] ✅ Mantendo jogador ${player.nickname} (socket existe: ${socketExists}, recentemente desconectado: ${isRecentlyDisconnected})`);
+                        } else {
+                            removedPlayersCount++;
+                            console.log(`[Socket.io] 🗑️ Removendo jogador órfão ${player.nickname} (sem socket ativo há ${Math.round(disconnectTime / 1000)}s)`);
+                        }
+                    });
+                    
+                    if (removedPlayersCount > 0) {
+                        console.log(`[Socket.io] 🧹 ${removedPlayersCount} jogadores órfãos removidos da sala ${room}`);
+                        
+                        // ✅ CRÍTICO: Forçar limpeza no Firestore imediatamente
+                        try {
+                            await cleanOrphanPlayersFromFirestore(room, activePlayers);
+                        } catch (error) {
+                            console.error(`[Socket.io] ❌ Erro ao limpar órfãos do Firestore:`, error);
+                        }
+                    }
+                    
+                    // ✅ Usar configuração salva do Firestore com jogadores limpos
                     roomConfig = {
                         ...savedConfig,
-                        players: savedConfig.players || {}, // ✅ Preservar players salvos
+                        players: activePlayers, // ✅ Apenas jogadores ativos
                         roundActive: false,
                         roundEnded: false,
                         currentLetter: '',
@@ -744,33 +815,55 @@ io.on('connection', (socket) => {
                 }
             }
 
-            // ✅ RESTAURAR: Estado de validação se existir
+            // ✅ RESTAURAR: Estado de validação se existir (mas validar jogadores órfãos)
             if (savedValidationState) {
-                console.log(`[Socket.io] 🎯 Restaurando estado de validação:`, savedValidationState);
+                console.log(`[Socket.io] 🎯 Validando estado de validação salvo...`);
                 
-                roomConfig.validationQueue = savedValidationState.validationQueue;
-                roomConfig.currentValidation = savedValidationState.currentValidation;
-                roomConfig.validatorId = savedValidationState.validatorId;
-                roomConfig.playersAnswers = savedValidationState.playersAnswers;
-                roomConfig.validationInProgress = true;
+                const currentPlayerIds = Object.keys(roomConfig.players || {});
+                const validationPlayerIds = [...new Set(savedValidationState.validationQueue?.map(item => item.playerId) || [])];
+                const validatorExists = currentPlayerIds.includes(savedValidationState.validatorId);
+                const playersExist = validationPlayerIds.some(playerId => currentPlayerIds.includes(playerId));
+                
+                if (validatorExists && playersExist) {
+                    console.log(`[Socket.io] ✅ Estado de validação válido - restaurando...`);
+                    
+                    roomConfig.validationQueue = savedValidationState.validationQueue;
+                    roomConfig.currentValidation = savedValidationState.currentValidation;
+                    roomConfig.validatorId = savedValidationState.validatorId;
+                    roomConfig.playersAnswers = savedValidationState.playersAnswers;
+                    roomConfig.validationInProgress = true;
+                } else {
+                    console.log(`[Socket.io] 🗑️ Estado de validação órfão detectado - limpando...`);
+                    console.log(`[Socket.io] - Validador existe: ${validatorExists}, Jogadores existem: ${playersExist}`);
+                    
+                    // Limpar validação órfã do Firestore
+                    try {
+                        await clearValidationStateFromFirestore(room);
+                        console.log(`[Socket.io] ✅ Validação órfã removida do Firestore`);
+                    } catch (error) {
+                        console.error(`[Socket.io] ❌ Erro ao limpar validação órfã do Firestore:`, error);
+                    }
+                }
             }
 
-            // ✅ IMPORTANTE: Sincronizar gameState com roomConfig
+            // ✅ IMPORTANTE: Sincronizar gameState com roomConfig (com jogadores limpos)
             if (!gameState.has(room)) {
                 gameState.set(room, {
-                    players: roomConfig.players || {},
+                    players: roomConfig.players || {}, // ✅ Já contém apenas jogadores ativos
                     themes: roomConfig.themes,
                     duration: roomConfig.duration,
                     createdAt: roomConfig.createdAt,
                     validationInProgress: roomConfig.validationInProgress || false
                 });
+                console.log(`[Socket.io] 🆕 GameState criado para sala ${room} com ${Object.keys(roomConfig.players || {}).length} jogadores ativos`);
             } else {
-                // ✅ Atualizar gameState existente com dados salvos
+                // ✅ Atualizar gameState existente com dados salvos (limpos)
                 const roomData = gameState.get(room);
-                roomData.players = roomConfig.players || {};
+                roomData.players = roomConfig.players || {}; // ✅ Sobrescrever com jogadores limpos
                 roomData.themes = roomConfig.themes;
                 roomData.duration = roomConfig.duration;
                 roomData.validationInProgress = roomConfig.validationInProgress || false;
+                console.log(`[Socket.io] 🔄 GameState atualizado para sala ${room} com ${Object.keys(roomConfig.players || {}).length} jogadores ativos`);
             }
             
             const roomData = gameState.get(room);
@@ -784,6 +877,14 @@ io.on('connection', (socket) => {
                 
                 if (existingPlayer) {
                     console.log(`[Socket.io] ✅ Jogador encontrado nos dados salvos - reconectando`);
+                    
+                    // ✅ Cancelar transferência de admin pendente se for admin reconectando
+                    if (existingPlayer.isCreator) {
+                        const cancelled = cancelAdminTransfer(room);
+                        if (cancelled) {
+                            console.log(`[Socket.io] 👑 Admin ${nickname} reconectou - mantendo status de admin`);
+                        }
+                    }
                     
                     // ✅ Atualizar dados do jogador
                     existingPlayer.socketId = socket.id;
@@ -817,14 +918,38 @@ io.on('connection', (socket) => {
                         creatorId: roomConfig.creatorId
                     });
                     
-                    // ✅ Se há validação em progresso, retomar
+                    // ✅ Verificar se validação ainda é válida na reconexão
                     if (roomConfig.validationInProgress && roomConfig.validationQueue) {
-                        console.log(`[Socket.io] 🎯 Retomando validação em progresso`);
+                        const currentPlayers = Object.keys(roomConfig.players);
+                        const validationPlayerIds = [...new Set(roomConfig.validationQueue.map(item => item.playerId))];
+                        const validatorExists = currentPlayers.includes(roomConfig.validatorId);
+                        const playersExist = validationPlayerIds.some(playerId => currentPlayers.includes(playerId));
                         
-                        const currentItem = roomConfig.validationQueue[roomConfig.currentValidation];
-                        if (currentItem) {
-                            console.log(`[Socket.io] ✅ Enviando item atual de validação:`, currentItem);
-                            io.to(room).emit("start_validation", currentItem);
+                        if (!validatorExists || !playersExist) {
+                            console.log(`[Socket.io] 🗑️ Validação órfã detectada na reconexão - limpando...`);
+                            
+                            // Limpar validação órfã
+                            roomConfig.validationInProgress = false;
+                            delete roomConfig.validationQueue;
+                            delete roomConfig.currentValidation;
+                            delete roomConfig.validatorId;
+                            delete roomConfig.playersAnswers;
+                            
+                            // Limpar do Firestore
+                            try {
+                                await clearValidationStateFromFirestore(room);
+                                console.log(`[Socket.io] ✅ Validação órfã removida do Firestore (reconexão)`);
+                            } catch (error) {
+                                console.error(`[Socket.io] ❌ Erro ao limpar validação órfã do Firestore (reconexão):`, error);
+                            }
+                        } else {
+                            console.log(`[Socket.io] 🎯 Retomando validação em progresso`);
+                            
+                            const currentItem = roomConfig.validationQueue[roomConfig.currentValidation];
+                            if (currentItem) {
+                                console.log(`[Socket.io] ✅ Enviando item atual de validação:`, currentItem);
+                                io.to(room).emit("start_validation", currentItem);
+                            }
                         }
                     }
                     
@@ -872,10 +997,21 @@ io.on('connection', (socket) => {
                 roomConfig.players[userId] = newPlayer;
                 roomData.players[userId] = newPlayer;
 
-                // ✅ IMPORTANTE: Se for o primeiro jogador e não há creatorId, definir como criador
-                if (Object.keys(roomConfig.players).length === 1 && !roomConfig.creatorId) {
+                // ✅ IMPORTANTE: Verificar se precisa definir novo admin
+                const currentCreatorExists = roomConfig.creatorId && roomConfig.players[roomConfig.creatorId];
+                
+                if (!roomConfig.creatorId || !currentCreatorExists || Object.keys(roomConfig.players).length === 1) {
                     roomConfig.creatorId = userId;
                     newPlayer.isCreator = true;
+                    
+                    // Remover isCreator de outros jogadores
+                    Object.values(roomConfig.players).forEach(player => {
+                        if (player.userId !== userId) {
+                            player.isCreator = false;
+                        }
+                    });
+                    
+                    console.log(`[Socket.io] 👑 ${nickname} definido como admin da sala ${room} (criador anterior não existe ou sala vazia)`);
                 }
             }
 
@@ -915,13 +1051,41 @@ io.on('connection', (socket) => {
                 isSaved: roomConfig.isSaved
             });
 
-            // ✅ Se há validação em progresso, enviar estado atual
+            // ✅ Verificar se há validação órfã (com jogadores que não estão mais na sala)
             if (roomConfig.validationInProgress && roomConfig.validationQueue) {
-                console.log(`[Socket.io] 🎯 Enviando estado atual de validação para novo jogador`);
+                const currentPlayers = Object.keys(roomConfig.players);
+                const validationPlayerIds = [...new Set(roomConfig.validationQueue.map(item => item.playerId))];
+                const validatorExists = currentPlayers.includes(roomConfig.validatorId);
+                const playersExist = validationPlayerIds.some(playerId => currentPlayers.includes(playerId));
                 
-                const currentItem = roomConfig.validationQueue[roomConfig.currentValidation];
-                if (currentItem) {
-                    socket.emit("start_validation", currentItem);
+                if (!validatorExists || !playersExist) {
+                    console.log(`[Socket.io] 🗑️ Validação órfã detectada - limpando...`);
+                    console.log(`[Socket.io] - Validador ${roomConfig.validatorId} existe: ${validatorExists}`);
+                    console.log(`[Socket.io] - Jogadores da validação existem: ${playersExist}`);
+                    console.log(`[Socket.io] - Jogadores atuais: ${currentPlayers}`);
+                    console.log(`[Socket.io] - Jogadores da validação: ${validationPlayerIds}`);
+                    
+                    // Limpar validação órfã
+                    roomConfig.validationInProgress = false;
+                    delete roomConfig.validationQueue;
+                    delete roomConfig.currentValidation;
+                    delete roomConfig.validatorId;
+                    delete roomConfig.playersAnswers;
+                    
+                    // Limpar do Firestore
+                    try {
+                        await clearValidationStateFromFirestore(room);
+                        console.log(`[Socket.io] ✅ Validação órfã removida do Firestore`);
+                    } catch (error) {
+                        console.error(`[Socket.io] ❌ Erro ao limpar validação órfã do Firestore:`, error);
+                    }
+                } else {
+                    console.log(`[Socket.io] 🎯 Enviando estado atual de validação para novo jogador`);
+                    
+                    const currentItem = roomConfig.validationQueue[roomConfig.currentValidation];
+                    if (currentItem) {
+                        socket.emit("start_validation", currentItem);
+                    }
                 }
             }
 
@@ -1294,6 +1458,242 @@ io.on('connection', (socket) => {
         }
     });
 
+    // ✅ Mapa para controlar timeouts de transferência de admin
+    const adminTransferTimeouts = new Map();
+
+    // ✅ Função para transferir admin para o próximo jogador disponível
+    function transferAdminRole(room) {
+        const config = roomConfigs[room];
+        if (!config || !config.players) return null;
+
+        const players = Object.values(config.players);
+        
+        // Se não há jogadores, limpar a sala
+        if (players.length === 0) {
+            console.log(`[Socket.io] 🗑️ Sala ${room} vazia - limpando configurações`);
+            delete roomConfigs[room];
+            return null;
+        }
+
+        // Encontrar o jogador mais antigo para ser o novo admin
+        const sortedPlayers = players.sort((a, b) => new Date(a.joinedAt) - new Date(b.joinedAt));
+        const newAdmin = sortedPlayers[0];
+        
+        // Atualizar creatorId e isCreator
+        const oldCreatorId = config.creatorId;
+        config.creatorId = newAdmin.userId;
+        
+        // Atualizar todos os jogadores
+        Object.values(config.players).forEach(player => {
+            player.isCreator = (player.userId === newAdmin.userId);
+        });
+        
+        console.log(`[Socket.io] 👑 Admin transferido na sala ${room}: ${oldCreatorId} -> ${newAdmin.userId} (${newAdmin.nickname})`);
+        
+        return newAdmin;
+    }
+
+    // ✅ Função para cancelar transferência de admin pendente
+    function cancelAdminTransfer(room) {
+        if (adminTransferTimeouts.has(room)) {
+            clearTimeout(adminTransferTimeouts.get(room));
+            adminTransferTimeouts.delete(room);
+            console.log(`[Socket.io] ⏹️ Transferência de admin cancelada para sala ${room}`);
+            return true;
+        }
+        return false;
+    }
+
+    // ✅ Função para agendar transferência de admin com delay
+    function scheduleAdminTransfer(room, disconnectedUserId, disconnectedNickname) {
+        const TRANSFER_DELAY = 5000; // 5 segundos
+        
+        console.log(`[Socket.io] ⏰ Agendando transferência de admin em ${TRANSFER_DELAY}ms para sala ${room}`);
+        
+        const timeout = setTimeout(() => {
+            console.log(`[Socket.io] ⏰ Executando transferência de admin agendada para sala ${room}`);
+            
+            const config = roomConfigs[room];
+            if (config && config.creatorId === disconnectedUserId) {
+                const newAdmin = transferAdminRole(room);
+                if (newAdmin) {
+                    console.log(`[Socket.io] 👑 Novo admin após delay na sala ${room}: ${newAdmin.nickname}`);
+                    
+                    // Atualizar jogadores restantes
+                    const remainingPlayers = Object.values(config.players || {});
+                    if (remainingPlayers.length > 0) {
+                        io.to(room).emit('players_update', remainingPlayers);
+                        emitRoomConfig(room, config);
+                    }
+                }
+            }
+            
+            adminTransferTimeouts.delete(room);
+        }, TRANSFER_DELAY);
+        
+        adminTransferTimeouts.set(room, timeout);
+    }
+
+    // ✅ Função para limpar jogadores desconectados há muito tempo
+    function cleanupDisconnectedPlayers() {
+        const CLEANUP_TIMEOUT = 30000; // 30 segundos
+        const now = new Date();
+        
+        console.log(`[Socket.io] 🧹 Executando limpeza automática de jogadores desconectados...`);
+        
+        for (const [room, config] of Object.entries(roomConfigs)) {
+            if (config && config.players) {
+                const playersToRemove = [];
+                
+                Object.values(config.players).forEach(player => {
+                    if (player.disconnectedAt) {
+                        const disconnectedTime = new Date(player.disconnectedAt);
+                        const timeDiff = now - disconnectedTime;
+                        
+                        if (timeDiff > CLEANUP_TIMEOUT) {
+                            playersToRemove.push(player.userId);
+                            console.log(`[Socket.io] 🧹 Marcando ${player.nickname} (${player.userId}) para remoção - desconectado há ${Math.round(timeDiff/1000)}s`);
+                        } else {
+                            console.log(`[Socket.io] ⏰ ${player.nickname} desconectado há ${Math.round(timeDiff/1000)}s - aguardando...`);
+                        }
+                    }
+                });
+                
+                // Remover jogadores desconectados há muito tempo
+                playersToRemove.forEach(userId => {
+                    const removedPlayer = config.players[userId];
+                    
+                    delete config.players[userId];
+                    
+                    const roomData = gameState.get(room);
+                    if (roomData && roomData.players) {
+                        delete roomData.players[userId];
+                    }
+                    
+                    console.log(`[Socket.io] 🗑️ Jogador ${removedPlayer?.nickname || userId} removido definitivamente da sala ${room}`);
+                });
+                
+                // Atualizar jogadores se houve remoções
+                if (playersToRemove.length > 0) {
+                    const remainingPlayers = Object.values(config.players || {});
+                    
+                    if (remainingPlayers.length > 0) {
+                        console.log(`[Socket.io] 📤 Atualizando lista de jogadores para sala ${room} - Restantes: ${remainingPlayers.length}`);
+                        io.to(room).emit('players_update', remainingPlayers);
+                        emitRoomConfig(room, config);
+                    } else {
+                        // Sala vazia - limpar
+                        delete roomConfigs[room];
+                        console.log(`[Socket.io] 🗑️ Sala ${room} removida - sem jogadores ativos`);
+                    }
+                }
+            }
+        }
+        
+        console.log(`[Socket.io] ✅ Limpeza automática concluída`);
+    }
+
+    // ✅ Executar limpeza periodicamente
+    setInterval(cleanupDisconnectedPlayers, 60000); // A cada 1 minuto
+
+    // ✅ Handler para saída voluntária da sala
+    socket.on('leave_room', async ({ userId, room }) => {
+        try {
+            const targetUserId = userId || socket.userId;
+            const targetRoom = room || socket.roomId;
+            
+            console.log(`[Socket.io] 🚪 LEAVE_ROOM: Jogador ${targetUserId} saindo da sala ${targetRoom}`);
+            
+            if (!targetRoom || !targetUserId) {
+                console.log(`[Socket.io] ❌ LEAVE_ROOM: Dados insuficientes - userId: ${targetUserId}, room: ${targetRoom}`);
+                return;
+            }
+
+            const config = roomConfigs[targetRoom];
+            if (!config) {
+                console.log(`[Socket.io] ❌ LEAVE_ROOM: Sala ${targetRoom} não existe em roomConfigs`);
+                return;
+            }
+            
+            if (!config.players) {
+                console.log(`[Socket.io] ❌ LEAVE_ROOM: Sala ${targetRoom} não tem lista de jogadores`);
+                return;
+            }
+            
+            // Verificar se jogador realmente existe na sala
+            const playerExists = config.players[targetUserId];
+            if (!playerExists) {
+                console.log(`[Socket.io] ⚠️ LEAVE_ROOM: Jogador ${targetUserId} não está na sala ${targetRoom}`);
+                return;
+            }
+            
+            const wasAdmin = (config.creatorId === targetUserId);
+            const playerNickname = playerExists.nickname;
+            
+            console.log(`[Socket.io] 👤 LEAVE_ROOM: ${playerNickname} (admin: ${wasAdmin}) saindo definitivamente`);
+            
+            // ✅ Cancelar transferência de admin pendente (saída voluntária é definitiva)
+            if (wasAdmin) {
+                cancelAdminTransfer(targetRoom);
+            }
+            
+            // Remover jogador da sala
+            delete config.players[targetUserId];
+            
+            // Se for gameState, também remover de lá
+            const roomData = gameState.get(targetRoom);
+            if (roomData && roomData.players) {
+                delete roomData.players[targetUserId];
+            }
+            
+            // ✅ CRÍTICO: Salvar configuração atualizada no Firestore (sem o jogador)
+            console.log(`[Socket.io] 💾 LEAVE_ROOM: Salvando configuração após remover ${playerNickname}. Jogadores restantes:`, Object.keys(config.players));
+            try {
+                const saved = await saveRoomConfigToFirestore(targetRoom, config);
+                if (saved) {
+                    console.log(`[Socket.io] ✅ LEAVE_ROOM: ${playerNickname} removido do Firestore com sucesso`);
+                } else {
+                    console.error(`[Socket.io] ❌ LEAVE_ROOM: Falha ao salvar configuração no Firestore`);
+                }
+            } catch (error) {
+                console.error(`[Socket.io] ❌ LEAVE_ROOM: Erro ao salvar configuração no Firestore:`, error);
+            }
+            
+            // Deixar o socket room
+            socket.leave(targetRoom);
+            
+            // Limpar dados do socket
+            socket.roomId = null;
+            
+            // Se era admin e ainda há jogadores, transferir admin IMEDIATAMENTE
+            if (wasAdmin) {
+                const newAdmin = transferAdminRole(targetRoom);
+                if (newAdmin) {
+                    console.log(`[Socket.io] 👑 LEAVE_ROOM: Novo admin na sala ${targetRoom}: ${newAdmin.nickname}`);
+                } else {
+                    console.log(`[Socket.io] 🗑️ LEAVE_ROOM: Sala ${targetRoom} vazia após saída do admin`);
+                }
+            }
+            
+            // Atualizar todos os jogadores restantes
+            const remainingPlayers = Object.values(config.players || {});
+            console.log(`[Socket.io] 📊 LEAVE_ROOM: Jogadores restantes na sala ${targetRoom}:`, remainingPlayers.map(p => p.nickname));
+            
+            if (remainingPlayers.length > 0) {
+                io.to(targetRoom).emit('players_update', remainingPlayers);
+                emitRoomConfig(targetRoom, config);
+                console.log(`[Socket.io] 📤 LEAVE_ROOM: Lista de jogadores atualizada para sala ${targetRoom}`);
+            } else {
+                console.log(`[Socket.io] 🗑️ LEAVE_ROOM: Sala ${targetRoom} vazia - será limpa pela função de cleanup`);
+            }
+            
+            console.log(`[Socket.io] ✅ LEAVE_ROOM: ${playerNickname} removido com sucesso. Restantes: ${remainingPlayers.length}`);
+            
+        } catch (error) {
+            console.error('[Socket.io] ❌ Erro no leave_room:', error);
+        }
+    });
+
     socket.on('disconnect', () => {
         console.log(`[Socket.io] Desconexão: ${socket.id} (userId: ${socket.userId})`);
         
@@ -1302,11 +1702,32 @@ io.on('connection', (socket) => {
             const config = roomConfigs[room];
             
             if (config && config.players) {
-                delete config.players[socket.userId];
+                const wasAdmin = (config.creatorId === socket.userId);
+                const playerNickname = socket.nickname;
                 
-                const playersArray = Object.values(config.players);
-                io.to(room).emit('players_update', playersArray);
-                emitRoomConfig(room, config);
+                // ⚠️ NÃO remover jogador da sala imediatamente - marcar como desconectado
+                if (config.players[socket.userId]) {
+                    config.players[socket.userId].disconnectedAt = new Date();
+                    config.players[socket.userId].socketId = null;
+                }
+                
+                // Se for gameState, marcar desconexão
+                const roomData = gameState.get(room);
+                if (roomData && roomData.players && roomData.players[socket.userId]) {
+                    roomData.players[socket.userId].disconnectedAt = new Date();
+                    roomData.players[socket.userId].socketId = null;
+                }
+                
+                // Se era admin, agendar transferência com delay
+                if (wasAdmin) {
+                    scheduleAdminTransfer(room, socket.userId, playerNickname);
+                }
+                
+                // Atualizar lista de jogadores (mostrar como desconectado)
+                const allPlayers = Object.values(config.players || {});
+                io.to(room).emit('players_update', allPlayers);
+                
+                console.log(`[Socket.io] ⏸️ Jogador ${playerNickname} desconectado temporariamente. Admin será transferido em 5s se não reconectar.`);
             }
         }
     });

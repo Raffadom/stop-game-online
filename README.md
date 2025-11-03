@@ -448,7 +448,83 @@ chore: atualiza dependências do projeto
 - 🔒 Revisão de segurança para mudanças sensíveis
 - ⚡ Performance não degradada
 
-## 🎯 Roadmap e Evolução
+## 📱 Publicação nas App Stores
+
+### **🎯 Estratégia Mobile**
+
+O **Stop Game Online** está sendo preparado para distribuição nas principais lojas de aplicativos, oferecendo a experiência completa do jogo em dispositivos móveis através de tecnologias modernas.
+
+#### **📋 Roadmap Mobile**
+- [ ] 🔄 **Conversão para PWA** (Progressive Web App)
+- [ ] 📱 **Wrapper nativo** com Capacitor/Cordova  
+- [ ] 🍎 **Publicação na App Store** (iOS)
+- [ ] 🤖 **Publicação no Google Play** (Android)
+- [ ] 🔔 **Push notifications nativas**
+- [ ] 📳 **Integração com recursos do device**
+
+#### **💰 Custos Estimados de Publicação**
+
+| Plataforma | Taxa de Desenvolvedor | Taxa por App | Renovação Anual |
+|------------|----------------------|--------------|-----------------|
+| 🍎 **Apple App Store** | $99 USD | Incluído | $99 USD |
+| 🤖 **Google Play Store** | $25 USD | Incluído | - (única vez) |
+| **TOTAL PRIMEIRO ANO** | **$124 USD** | **~R$ 700** | **$99 USD/ano** |
+
+#### **📱 Tecnologias para Mobile**
+
+```javascript
+// Stack Tecnológico Mobile
+{
+  "pwa": {
+    "service_worker": "Workbox",
+    "manifest": "Web App Manifest",
+    "offline_support": "Cache API + IndexedDB"
+  },
+  "native_wrapper": {
+    "framework": "Capacitor 5.0+", 
+    "alternative": "Cordova/PhoneGap",
+    "build_tool": "Capacitor CLI"
+  },
+  "features": {
+    "push_notifications": "@capacitor/push-notifications",
+    "local_storage": "@capacitor/storage", 
+    "splash_screen": "@capacitor/splash-screen",
+    "status_bar": "@capacitor/status-bar"
+  }
+}
+```
+
+#### **🔧 Preparação Técnica Necessária**
+
+##### **1. PWA (Progressive Web App)**
+- ✅ Service Worker para cache offline
+- ✅ Web App Manifest configurado
+- ✅ HTTPS obrigatório (já implementado)
+- ✅ Design responsivo (Tailwind CSS)
+- 🔄 Otimização para touch/gestos
+- 🔄 Splash screen personalizada
+
+##### **2. Capacitor Integration**
+```bash
+# Instalação e setup
+npm install @capacitor/core @capacitor/cli
+npx cap init "Stop Game" "com.rafaeldomingos.stopgame"
+npm install @capacitor/android @capacitor/ios
+
+# Build e sincronização
+npm run build
+npx cap add android
+npx cap add ios
+npx cap sync
+```
+
+##### **3. Assets e Recursos**
+- 📱 **Ícones**: 1024x1024px (iOS), múltiplas resoluções (Android)  
+- 🖼️ **Splash Screens**: Diversas resoluções para cada plataforma
+- 📄 **Metadados**: Descrições, screenshots, palavras-chave
+- 🔒 **Certificados**: Assinatura digital para distribuição
+
+### **🎯 Roadmap e Evolução**
 
 ### **📋 Próximas Features**
 - [ ] 💬 Sistema de chat em tempo real
@@ -457,17 +533,19 @@ chore: atualiza dependências do projeto
 - [ ] 🎨 Temas customizáveis por sala
 - [ ] 🏁 Modo torneio com eliminatórias
 - [ ] 📊 Dashboard analytics para admins
-- [ ] 🔊 Sistema de notificações push
+- [ ] � Sistema de notificações push nativas
 - [ ] 🌍 Internacionalização (i18n)
+- [ ] 📱 **Features mobile exclusivas**
 
 ### **🔧 Melhorias Técnicas**
 - [ ] ⚡ Migration para TypeScript
 - [ ] 🏗️ Arquitetura de microservices
-- [ ] 📱 Progressive Web App (PWA)
+- [ ] 📱 **PWA completa com offline mode**
 - [ ] 🧪 Testes de carga automatizados
 - [ ] 🔄 CI/CD pipeline completo
 - [ ] 📈 Métricas avançadas de performance
 - [ ] 🔍 Logging estruturado (ELK Stack)
+- [ ] 📱 **Native mobile builds**
 
 ## 📝 Licença e Créditos
 

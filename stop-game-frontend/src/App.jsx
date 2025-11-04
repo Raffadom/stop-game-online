@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { socket } from "./socket";
+import { useState, useEffect, useCallback } from 'react';
+import { socket } from './socket';
 import Home from './components/Home';
 import Room from './components/Room';
 import { v4 as uuidv4 } from 'uuid';
@@ -600,8 +600,8 @@ function App() {
     setResetRoundFlag(prev => prev + 1);
   }, []);
 
-  // ✅ ADICIONAR: Função para iniciar validação
-  const handleStartValidation = useCallback(() => {
+  // ✅ ADICIONAR: Função para iniciar validação (não utilizada ainda)
+  const _handleStartValidation = useCallback(() => {
     console.log('[App] Iniciando validação');
     socket.emit('start_validation', { room: roomName });
   }, [roomName]);

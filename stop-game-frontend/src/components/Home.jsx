@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { socket } from "../socket";
+import { socket as _socket } from "../socket";
 import { v4 as uuidv4 } from 'uuid'; // Importe uuid para gerar IDs únicos
 
 import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
@@ -47,7 +47,7 @@ export default function Home({ onJoinOrCreateRoom, roomError, isConnected, theme
     onJoinOrCreateRoom(roomData); // ✅ CORRIGIR: Passar objeto completo
   };
 
-  const handleCreate = () => {
+  const _handleCreate = () => {
     console.log('handleCreate foi chamado!');
     
     // ✅ CORRIGIR: Passar objeto com estrutura esperada pelo App.jsx  

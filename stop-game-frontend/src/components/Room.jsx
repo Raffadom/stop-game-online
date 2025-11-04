@@ -35,7 +35,7 @@ const Alert = ({ message, type, isVisible, onClose }) => {
 };
 
 export default function Room({
-  nickname,
+  _nickname,
   room,
   userId,
   playersInRoom,

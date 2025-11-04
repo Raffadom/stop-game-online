@@ -5,8 +5,8 @@ import Modal from "./Modal";
 function GameBoard({
   roundStarted,
   roundEnded,
-  onResetRound,
-  resetRoundFlag,
+  _onResetRound,
+  _resetRoundFlag,
   letter,
   isAdmin,
   userId,
@@ -16,9 +16,9 @@ function GameBoard({
   stopClickedByMe,
   handleStopRound,
   room,
-  isRoomSaved,
-  handleSaveRoom,
-  alertState,
+  _isRoomSaved,
+  _handleSaveRoom,
+  _alertState,
   setAlertState,
   validationState, // ✅ NOVO: Receber estado de validação
 }) {
@@ -32,13 +32,13 @@ function GameBoard({
   const [isValidating, setIsValidating] = useState(false);
   const [isRevealing, setIsRevealing] = useState(false);
   const [canReveal, setCanReveal] = useState(false);
-  const [revealed, setRevealed] = useState(false);
+  const [_revealed, setRevealed] = useState(false);
   const [roundScore, setRoundScore] = useState(null);
   const [showRoundResult, setShowRoundResult] = useState(false);
-  const [isRoundActive, setIsRoundActive] = useState(false);
-  const [showResults, setShowResults] = useState(false);
+  const [_isRoundActive, setIsRoundActive] = useState(false);
+  const [_showResults, _setShowResults] = useState(false);
   const [currentValidated, setCurrentValidated] = useState(false);
-  const [roundScores, setRoundScores] = useState(null);
+  const [_roundScores, _setRoundScores] = useState(null);
   const [finalRanking, setFinalRanking] = useState(null);
   const [answersSubmitted, setAnswersSubmitted] = useState(false);
   
@@ -52,13 +52,13 @@ function GameBoard({
 
   const maxThemes = 20;
 
-  // Temas padrão
-  const defaultThemes = [
+  // Temas padrão (não utilizados diretamente no momento)
+  const _defaultThemes = [
     "Nome", "Cidade", "País", "Marca", "Cor", "Animal"
   ];
 
-  // ✅ Função para atualizar respostas com temas
-  const updateAnswersWithThemes = useCallback((themes) => {
+  // ✅ Função para atualizar respostas com temas (preparada para uso futuro)
+  const _updateAnswersWithThemes = useCallback((themes) => {
     if (themes && themes.length > 0) {
       console.log('[GameBoard] Atualizando respostas com temas:', themes);
       setAnswers(themes.map(theme => ({ 
@@ -97,8 +97,8 @@ function GameBoard({
     }
   }, [submitAnswers, handleStopRound]);
 
-  // ✅ Função para revelar resposta
-  const handleRevealAnswer = useCallback(() => {
+  // ✅ Função para revelar resposta (preparada para uso futuro)
+  const _handleRevealAnswer = useCallback(() => {
     console.log('[GameBoard] 🔍 Revelando resposta...', { canReveal, isRevealing, room });
     
     if (isRevealing) {
@@ -109,7 +109,7 @@ function GameBoard({
     setIsRevealing(true);
     console.log('[GameBoard] 📤 Emitindo reveal_answer para sala:', room);
     socket.emit("reveal_answer", { room });
-  }, [isRevealing, room]);
+  }, [canReveal, isRevealing, room]);
 
   // ✅ Funções de gerenciamento de sala
   const handleNewRound = useCallback(() => {
@@ -207,8 +207,8 @@ function GameBoard({
     setAnswers(newAnswers);
   }, [answers]);
 
-  // ✅ Função handleValidate
-  const handleValidate = useCallback((isValid) => {
+  // ✅ Função handleValidate (preparada para uso futuro)
+  const _handleValidate = useCallback((isValid) => {
     if (!canReveal || !validationData || isValidating || currentValidated) {
       console.log('[GameBoard] Validation blocked:', { canReveal, validationData: !!validationData, isValidating, currentValidated });
       return;
@@ -425,7 +425,7 @@ function GameBoard({
     const handleNewRoundStarted = () => {
       console.log('[GameBoard] 🔄 Nova rodada iniciada - resetando estados');
       
-      setAnswers(prevAnswers => {
+      setAnswers(_prevAnswers => {
         if (roomThemes && roomThemes.length > 0) {
           console.log('[GameBoard] Resetando respostas para temas:', roomThemes);
           return roomThemes.map(theme => ({ 
@@ -597,7 +597,7 @@ function GameBoard({
       socket.off("validation_cancelled", handleValidationCancelled);
       socket.off('validation_error', handleValidationError);
     };
-  }, [socket, room, setRoomThemes, roomThemes, answersSubmitted, handleValidationCompleteForPlayer, handleGameEnded, handleNoAnswersToValidate, userId, validationData]);
+  }, [room, setRoomThemes, roomThemes, answersSubmitted, handleValidationCompleteForPlayer, handleGameEnded, handleNoAnswersToValidate, userId, validationData, setAlertState]);
 
   // ✅ useEffect para configuração inicial
   useEffect(() => {
@@ -663,7 +663,7 @@ function GameBoard({
       userId 
     });
     setShowResumeButton(false);
-  }, [socket, room, userId, validationData]);
+  }, [room, userId, validationData]);
 
   // ✅ Render principal
   return (

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { socket } from "../socket";
-import Modal from "./Modal";
+// import Modal from "./Modal"; // Prepared for future use
 
 function GameBoard({
   roundStarted,

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { socket } from './socket';
-import Home from './components/Home';
-import Room from './components/Room';
+import _Home from './components/Home';
+import _Room from './components/Room';
 import { v4 as uuidv4 } from 'uuid';
 import './App.css';
 import { useSessionPersistence } from "./hooks/useSessionPersistence";
@@ -629,7 +629,7 @@ function App() {
       
       {currentPage === 'home' && !isReconnecting && (
         <div data-testid="home-page">
-          <Home 
+          <_Home 
             onJoinOrCreateRoom={handleJoinOrCreateRoom}
             roomError={roomError}
             isConnected={isConnected}
@@ -641,7 +641,7 @@ function App() {
       
       {currentPage === 'room' && !isReconnecting && (
         <div data-testid="room-page">
-          <Room 
+          <_Room 
             userId={userId}
             nickname={nickname}
             room={roomName}

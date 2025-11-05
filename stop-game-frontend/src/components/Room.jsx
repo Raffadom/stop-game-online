@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from "react";
-import GameBoard from "./GameBoard";
-import Timer from "./Timer";
-import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
+import { useState, useEffect } from "react";
+// import GameBoard from "./GameBoard"; // Prepared for game functionality
+// import Timer from "./Timer"; // Prepared for timer functionality  
+// import { SunIcon, MoonIcon } from '@heroicons/react/24/solid'; // Prepared for theme toggle
 import { socket } from '../socket';
 
-// Alertas customizados para melhor UX
-const Alert = ({ message, type, isVisible, onClose }) => {
+// Alertas customizados para melhor UX (preparado para uso futuro)
+const _Alert = ({ message, type, isVisible, onClose }) => {
   if (!isVisible) return null;
 
   const getBackgroundColor = () => {

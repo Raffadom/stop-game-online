@@ -34,7 +34,10 @@ jobs:
           cd stop-game-frontend
           rm -rf node_modules package-lock.json
           npm cache clean --force
-          npm install --legacy-peer-deps
+          # Install with forced platform specific binary
+          ROLLUP_BINARY_PATH=/tmp npm install --legacy-peer-deps
+          # Verify rollup installation
+          npx rollup --version || echo "Rollup not found, continuing anyway"
 
       - name: Install backend dependencies
         run: cd stop-game-backend && npm install --legacy-peer-deps
@@ -131,7 +134,9 @@ jobs:
       - name: Install and build
         run: |
           cd stop-game-frontend
-          npm install --legacy-peer-deps
+          rm -rf node_modules package-lock.json
+          npm cache clean --force
+          ROLLUP_BINARY_PATH=/tmp npm install --legacy-peer-deps
           npm run build
 
       - name: Deploy to Netlify

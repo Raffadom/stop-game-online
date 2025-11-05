@@ -945,14 +945,14 @@ function GameBoard({
                   {validationData.currentIndex} de {validationData.totalItems}
                 </p>
 
-                <div className="bg-blue-50 p-4 rounded-lg">
-                  <p><strong>Jogador:</strong> {validationData.playerNickname}</p>
-                  <p><strong>Tema:</strong> {validationData.theme}</p>
-                  <p><strong>Resposta:</strong> 
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                  <p className="text-gray-800 dark:text-gray-200"><strong>Jogador:</strong> {validationData.playerNickname}</p>
+                  <p className="text-gray-800 dark:text-gray-200"><strong>Tema:</strong> {validationData.theme}</p>
+                  <p className="text-gray-800 dark:text-gray-200"><strong>Resposta:</strong> 
                       <span className={`ml-2 px-2 py-1 rounded ${
                           !validationData.answer || validationData.answer.trim() === "" 
-                              ? "bg-gray-200 text-gray-600" 
-                              : "bg-green-100 text-green-800"
+                              ? "bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300" 
+                              : "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300"
                       }`}>
                           {!validationData.answer || validationData.answer.trim() === "" 
                               ? "Vazia" 
@@ -962,7 +962,7 @@ function GameBoard({
                   </p>
                   
                   {!validationData.isValidator && (
-                      <p className="text-sm text-gray-600 mt-2">
+                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
                           <strong>Validador:</strong> {validationData.validatorNickname}
                       </p>
                   )}

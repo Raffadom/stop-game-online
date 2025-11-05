@@ -95,7 +95,7 @@ jobs:
           sleep 10
 
       - name: Wait for servers
-        run: npx wait-on http://localhost:3000 http://localhost:4173 --timeout 60000
+        run: npx wait-on http://localhost:3001 http://localhost:4173 --timeout 60000
 
       - name: Run Cypress tests
         run: npx cypress run --config baseUrl=http://localhost:4173

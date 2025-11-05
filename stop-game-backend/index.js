@@ -6,39 +6,64 @@ const cors = require("cors");
 const { Server } = require("socket.io");
 const admin = require('firebase-admin');
 
-// ✅ CORRIGIR: Inicialização do Firebase
-try {
-    const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '{}');
-    
-    if (!serviceAccount.project_id) {
-        throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON não configurada ou project_id ausente");
-    }
-    
-    // ✅ IMPORTANTE: Verificar se já foi inicializado
-    let app;
-    try {
-        app = admin.app(); // Tenta pegar app existente
-    } catch (e) {
-        // Se não existe, inicializa
-        app = admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount),
-            projectId: serviceAccount.project_id // ✅ ADICIONAR: Definir explicitamente
-        });
-    }
-    
-    console.log("🔥 Firebase Admin SDK inicializado com sucesso!");
-    console.log("📋 Projeto:", serviceAccount.project_id); // ✅ USAR: serviceAccount.project_id
-    console.log("📋 App Name:", app.name);
-    
-} catch (e) {
-    console.error("❌ Erro ao inicializar Firebase Admin SDK:", e);
-    throw e;
-}
+// ✅ CORRIGIR: Inicialização do Firebase com modo de teste
+let db;
+const isTestMode = process.env.NODE_ENV === 'test' || process.env.CI === 'true';
 
-const db = admin.firestore();
+if (isTestMode) {
+    console.log("🧪 Modo de teste detectado - executando sem Firebase");
+    // Mock do Firestore para testes
+    db = {
+        collection: () => ({
+            doc: () => ({
+                get: () => Promise.resolve({ exists: false }),
+                set: () => Promise.resolve(),
+                update: () => Promise.resolve(),
+                delete: () => Promise.resolve()
+            }),
+            add: () => Promise.resolve({ id: 'mock-id' }),
+            get: () => Promise.resolve({ docs: [] })
+        })
+    };
+} else {
+    try {
+        const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON || '{}');
+        
+        if (!serviceAccount.project_id) {
+            throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON não configurada ou project_id ausente");
+        }
+        
+        // ✅ IMPORTANTE: Verificar se já foi inicializado
+        let app;
+        try {
+            app = admin.app(); // Tenta pegar app existente
+        } catch (e) {
+            // Se não existe, inicializa
+            app = admin.initializeApp({
+                credential: admin.credential.cert(serviceAccount),
+                projectId: serviceAccount.project_id // ✅ ADICIONAR: Definir explicitamente
+            });
+        }
+        
+        console.log("🔥 Firebase Admin SDK inicializado com sucesso!");
+        console.log("📋 Projeto:", serviceAccount.project_id); // ✅ USAR: serviceAccount.project_id
+        console.log("📋 App Name:", app.name);
+        
+        db = admin.firestore();
+        
+    } catch (e) {
+        console.error("❌ Erro ao inicializar Firebase Admin SDK:", e);
+        throw e;
+    }
+}
 
 // Teste de conexão com o Firestore
 async function testFirestore() {
+    if (isTestMode) {
+        console.log("✅ Modo de teste - pulando teste do Firestore");
+        return;
+    }
+    
     try {
         const testRef = db.collection('test').doc('connection-test');
         await testRef.set({ timestamp: admin.firestore.FieldValue.serverTimestamp() });

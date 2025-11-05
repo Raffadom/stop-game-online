@@ -98,7 +98,12 @@ jobs:
         run: npx wait-on http://localhost:3001 http://localhost:4173 --timeout 60000
 
       - name: Run Cypress tests
-        run: npx cypress run --config baseUrl=http://localhost:4173
+        uses: cypress-io/github-action@v6
+        with:
+          install: false
+          start: echo "Servers already running"
+          wait-on: 'http://localhost:3001, http://localhost:4173'
+          config: baseUrl=http://localhost:4173
         continue-on-error: true
 
       - name: Upload screenshots on failure

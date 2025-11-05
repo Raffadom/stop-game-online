@@ -99,14 +99,14 @@ jobs:
         continue-on-error: true
 
       - name: Upload screenshots on failure
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: cypress-screenshots
           path: cypress/screenshots
 
       - name: Upload videos
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: cypress-videos
@@ -135,11 +135,9 @@ jobs:
           npm run build
 
       - name: Deploy to Netlify
-        uses: netlify/actions/deploy@master
+        uses: netlify/actions/cli@master
         with:
-          publish-dir: ./stop-game-frontend/dist
-          production-branch: main
-          production-deploy: true
+          args: deploy --dir=./stop-game-frontend/dist --prod
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}

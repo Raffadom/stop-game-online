@@ -7,7 +7,11 @@ export default {
     "./src/**/*.{js,ts,jsx,tsx}"
   ],
   theme: {
-    extend: {},
+    extend: {
+      spacing: {
+        '6': '1rem', // Override p-6 to use 1rem instead of 1.5rem
+      },
+    },
   },
   plugins: [],
 }

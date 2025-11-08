@@ -98,16 +98,22 @@ jobs:
       - name: Install and verify Cypress
         run: |
           echo "🔧 Installing Cypress binary..."
-          npx cypress install --force
+          npm install cypress --save-dev --legacy-peer-deps
           
-          echo "✅ Verifying Cypress installation..."
-          npx cypress verify
+          echo "📁 Checking if Cypress binary exists..."
+          ls -la ./node_modules/.bin/cypress || echo "Cypress binary not found"
+          
+          echo "✅ Installing Cypress binary manually..."
+          ./node_modules/.bin/cypress install --force
           
           echo "📋 Checking Cypress version..."
-          npx cypress version
+          ./node_modules/.bin/cypress version
           
           echo "🔐 Setting executable permissions..."
-          chmod +x ~/.cache/Cypress/*/Cypress/Cypress || echo "Permission setting failed, continuing..."
+          find ~/.cache/Cypress -name "Cypress" -type f -exec chmod +x {} \; || echo "Permission setting failed, continuing..."
+          
+          echo "🔍 Final verification..."
+          ./node_modules/.bin/cypress verify
 
       - name: Setup display for headless chrome
         run: |
@@ -146,26 +152,8 @@ jobs:
           npx cypress verify
 
       - name: Run Cypress tests
-        id: cypress-action
-        uses: cypress-io/github-action@v6
-        with:
-          install: false
-          browser: chrome
-          headless: true
-          wait-on: 'http://localhost:3001, http://localhost:4173'
-          wait-on-timeout: 120
-          config: baseUrl=http://localhost:4173
-          env: environment=ci
-        env:
-          CYPRESS_CACHE_FOLDER: ~/.cache/Cypress
-          NODE_ENV: ci
-          DISPLAY: :99
-        continue-on-error: true
-        
-      - name: Fallback Cypress execution
-        if: failure() && steps.cypress-action.outcome == 'failure'
         run: |
-          echo "🔄 GitHub Action failed, trying manual execution..."
+          echo "🔄 Preparing to run Cypress tests..."
           chmod +x ./scripts/cypress-ci.sh
           ./scripts/cypress-ci.sh
         env:

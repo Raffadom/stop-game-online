@@ -9,20 +9,23 @@ echo "🔧 Preparing Cypress for CI environment..."
 echo "📋 Node.js version: $(node --version)"
 echo "📋 NPM version: $(npm --version)"
 
+# Definir caminho do Cypress
+CYPRESS_BIN="./node_modules/.bin/cypress"
+
 # Verificar se o Cypress está instalado
 echo "🔍 Checking Cypress installation..."
-if ! npx cypress --version; then
-    echo "❌ Cypress not found, installing..."
-    npx cypress install --force
+if [ ! -f "$CYPRESS_BIN" ]; then
+    echo "❌ Cypress binary not found at $CYPRESS_BIN"
+    exit 1
 fi
 
 # Verificar binário do Cypress
 echo "✅ Verifying Cypress binary..."
-npx cypress verify
+$CYPRESS_BIN verify
 
-# Verificar informações do sistema
-echo "🖥️ System info:"
-npx cypress info
+# Verificar versão
+echo "� Cypress version:"
+$CYPRESS_BIN version
 
 # Aguardar servidores
 echo "⏳ Waiting for servers to be ready..."
@@ -42,7 +45,7 @@ export DISPLAY=${DISPLAY:-:99}
 
 # Executar testes
 echo "🧪 Running Cypress tests..."
-npx cypress run \
+$CYPRESS_BIN run \
     --browser chrome \
     --headless \
     --config baseUrl=http://localhost:4173 \
@@ -51,7 +54,7 @@ npx cypress run \
     --reporter-options output=cypress/results/results.json || {
     echo "❌ Cypress tests failed"
     echo "🔍 Cypress debug info:"
-    npx cypress version
+    $CYPRESS_BIN version
     ls -la ~/.cache/Cypress/ || echo "No Cypress cache found"
     exit 1
 }

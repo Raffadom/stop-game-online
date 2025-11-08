@@ -82,16 +82,40 @@ jobs:
           restore-keys: |
             cypress-${{ runner.os }}-
 
-      - name: Install dependencies
-        run: |
-          npm install --legacy-peer-deps
-          cd stop-game-frontend && npm install --legacy-peer-deps
-          cd ../stop-game-backend && npm install --legacy-peer-deps
+      - name: Install root dependencies
+        run: npm install --legacy-peer-deps
 
-      - name: Install Cypress binary
+      - name: Install frontend dependencies
         run: |
-          npx cypress install
+          cd stop-game-frontend
+          rm -rf node_modules package-lock.json
+          npm cache clean --force
+          ROLLUP_BINARY_PATH=/tmp npm install --legacy-peer-deps
+
+      - name: Install backend dependencies
+        run: cd stop-game-backend && npm install --legacy-peer-deps
+
+      - name: Install and verify Cypress
+        run: |
+          # Force install Cypress binary
+          npx cypress install --force
+          
+          # Verify installation
           npx cypress verify
+          
+          # Check version
+          npx cypress version
+          
+          # Ensure executable permissions
+          chmod +x ~/.cache/Cypress/*/Cypress/Cypress || true
+
+      - name: Setup display for headless chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk2.0-0 libgtk-3-0 libgbm-dev libnotify-dev libgconf-2-4 libnss3 libxss1 libasound2 libxtst6 xauth
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+          sleep 3
 
       - name: Build frontend
         run: cd stop-game-frontend && npm run build
@@ -117,16 +141,11 @@ jobs:
           curl -f http://localhost:4173 || echo "Frontend not responding"
 
       - name: Run Cypress tests
-        uses: cypress-io/github-action@v6
-        with:
-          install: false
-          start: echo "Servers already running"
-          wait-on: 'http://localhost:3001, http://localhost:4173'
-          config: baseUrl=http://localhost:4173
-          browser: chrome
+        run: ./scripts/cypress-ci.sh
         env:
           CYPRESS_CACHE_FOLDER: ~/.cache/Cypress
           NODE_ENV: ci
+          DISPLAY: :99
         continue-on-error: true
 
       - name: Upload screenshots on failure

@@ -19,6 +19,10 @@ if [ ! -f "$CYPRESS_BIN" ]; then
     exit 1
 fi
 
+# Garantir permissões executáveis
+echo "🔐 Ensuring executable permissions..."
+chmod +x "$CYPRESS_BIN"
+
 # Verificar binário do Cypress
 echo "✅ Verifying Cypress binary..."
 $CYPRESS_BIN verify

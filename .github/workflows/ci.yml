@@ -103,13 +103,16 @@ jobs:
           echo "📁 Checking if Cypress binary exists..."
           ls -la ./node_modules/.bin/cypress || echo "Cypress binary not found"
           
+          echo "🔐 Setting executable permissions for Cypress binary..."
+          chmod +x ./node_modules/.bin/cypress
+          
           echo "✅ Installing Cypress binary manually..."
           ./node_modules/.bin/cypress install --force
           
           echo "📋 Checking Cypress version..."
           ./node_modules/.bin/cypress version
           
-          echo "🔐 Setting executable permissions..."
+          echo "🔐 Setting executable permissions for cached binaries..."
           find ~/.cache/Cypress -name "Cypress" -type f -exec chmod +x {} \; || echo "Permission setting failed, continuing..."
           
           echo "🔍 Final verification..."

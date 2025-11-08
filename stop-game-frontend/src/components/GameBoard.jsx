@@ -709,9 +709,9 @@ function GameBoard({
                 <li
                   key={p.playerId}
                   className={`flex justify-between items-center p-4 rounded-lg ${
-                    idx === 0 ? "bg-yellow-400 text-gray-900 font-bold" :
-                    idx === 1 ? "bg-gray-300 text-gray-800 font-semibold" :
-                    idx === 2 ? "bg-orange-300 text-gray-800 font-semibold" :
+                    idx === 0 ? "bg-yellow-400 text-gray-900 font-bold dark:bg-yellow-500 dark:text-gray-900" :
+                    idx === 1 ? "bg-gray-300 text-gray-800 font-semibold dark:bg-gray-500 dark:text-gray-100" :
+                    idx === 2 ? "bg-orange-300 text-gray-800 font-semibold dark:bg-orange-500 dark:text-gray-100" :
                     "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100"
                   }`}
                 >
@@ -925,7 +925,7 @@ function GameBoard({
               }}
             >
               <div className="space-y-4">
-                <h3 className="text-lg font-bold text-center text-gray-800">
+                <h3 className="text-lg font-bold text-center text-gray-800 dark:text-gray-200">
                   {validationData.isValidator ? (
                     <>✏️ Validação de Resposta</>
                   ) : (
@@ -933,7 +933,7 @@ function GameBoard({
                   )}
                 </h3>
                 
-                <div className="bg-gray-200 rounded-full h-2 mb-4">
+                <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-4">
                   <div 
                     className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
                     style={{ 
@@ -941,7 +941,7 @@ function GameBoard({
                     }}
                   ></div>
                 </div>
-                <p className="text-sm text-gray-600 text-center">
+                <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
                   {validationData.currentIndex} de {validationData.totalItems}
                 </p>
 
@@ -971,13 +971,13 @@ function GameBoard({
                 {validationData.showResult && validationData.resultData && (
                     <div className={`p-4 rounded-lg text-center ${
                         validationData.resultData.valid 
-                            ? 'bg-green-100 border-green-500 border-2' 
-                            : 'bg-red-100 border-red-500 border-2'
+                            ? 'bg-green-100 dark:bg-green-900/30 border-green-500 border-2' 
+                            : 'bg-red-100 dark:bg-red-900/30 border-red-500 border-2'
                     }`}>
-                        <p className="font-bold text-lg">
+                        <p className="font-bold text-lg text-gray-800 dark:text-gray-200">
                             {validationData.resultData.valid ? '✅ VÁLIDA' : '❌ INVÁLIDA'}
                         </p>
-                        <p className="text-sm mt-1">
+                        <p className="text-sm mt-1 text-gray-600 dark:text-gray-400">
                             {validationData.resultData.playerNickname} - {validationData.resultData.theme}: "{validationData.resultData.answer}"
                         </p>
                     </div>
@@ -1009,7 +1009,7 @@ function GameBoard({
 
                 {/* Para espectadores: apenas texto informativo */}
                 {!validationData.isValidator && (
-                    <div className="text-center text-gray-600 text-sm">
+                    <div className="text-center text-gray-600 dark:text-gray-400 text-sm">
                         <p>Aguardando validação de <strong>{validationData.validatorNickname}</strong></p>
                     </div>
                 )}
@@ -1048,7 +1048,7 @@ function GameBoard({
 
           {/* Resultado da Rodada */}
           {showRoundResult && roundScore !== null && !finalRanking && (
-            <div className="mt-6 bg-gradient-to-r from-blue-50 to-green-50 dark:from-blue-900 dark:to-green-900 p-6 rounded-xl border-2 border-blue-200 dark:border-blue-700 text-center">
+            <div className="mt-6 bg-gradient-to-r from-blue-50 to-green-50 dark:from-blue-900/50 dark:to-green-900/50 p-6 rounded-xl border-2 border-blue-200 dark:border-blue-700 text-center">
               <div className="flex items-center justify-center mb-4">
                 <div className="bg-blue-500 text-white rounded-full p-2 mr-3">
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

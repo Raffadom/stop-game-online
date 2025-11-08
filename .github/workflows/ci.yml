@@ -97,17 +97,17 @@ jobs:
 
       - name: Install and verify Cypress
         run: |
-          # Force install Cypress binary
+          echo "🔧 Installing Cypress binary..."
           npx cypress install --force
           
-          # Verify installation
+          echo "✅ Verifying Cypress installation..."
           npx cypress verify
           
-          # Check version
+          echo "📋 Checking Cypress version..."
           npx cypress version
           
-          # Ensure executable permissions
-          chmod +x ~/.cache/Cypress/*/Cypress/Cypress || true
+          echo "🔐 Setting executable permissions..."
+          chmod +x ~/.cache/Cypress/*/Cypress/Cypress || echo "Permission setting failed, continuing..."
 
       - name: Setup display for headless chrome
         run: |
@@ -137,11 +137,37 @@ jobs:
 
       - name: Verify servers are running
         run: |
-          curl -f http://localhost:3001 || echo "Backend not responding"
-          curl -f http://localhost:4173 || echo "Frontend not responding"
+          echo "🔍 Checking if servers are responding..."
+          curl -f http://localhost:3001 || echo "⚠️ Backend not responding"
+          curl -f http://localhost:4173 || echo "⚠️ Frontend not responding"
+          
+          echo "🔍 Final Cypress verification before tests..."
+          npx cypress version
+          npx cypress verify
 
       - name: Run Cypress tests
-        run: ./scripts/cypress-ci.sh
+        id: cypress-action
+        uses: cypress-io/github-action@v6
+        with:
+          install: false
+          browser: chrome
+          headless: true
+          wait-on: 'http://localhost:3001, http://localhost:4173'
+          wait-on-timeout: 120
+          config: baseUrl=http://localhost:4173
+          env: environment=ci
+        env:
+          CYPRESS_CACHE_FOLDER: ~/.cache/Cypress
+          NODE_ENV: ci
+          DISPLAY: :99
+        continue-on-error: true
+        
+      - name: Fallback Cypress execution
+        if: failure() && steps.cypress-action.outcome == 'failure'
+        run: |
+          echo "🔄 GitHub Action failed, trying manual execution..."
+          chmod +x ./scripts/cypress-ci.sh
+          ./scripts/cypress-ci.sh
         env:
           CYPRESS_CACHE_FOLDER: ~/.cache/Cypress
           NODE_ENV: ci

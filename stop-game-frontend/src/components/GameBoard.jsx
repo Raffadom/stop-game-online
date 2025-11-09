@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { socket } from "../socket";
-import Modal from "./Modal"; // ✅ CORRIGIR: Descomentar import do Modal
+// Modal inline usado diretamente no JSX para garantir dark mode
 
 function GameBoard({
   roundStarted,
@@ -905,37 +905,45 @@ function GameBoard({
 
           {/* Validation Modal */}
           {showModal && validationData && (
-            <Modal 
-              onClose={() => {
-                console.log('[GameBoard] 🔒 Fechando modal de validação');
-                
-                // ✅ IMPORTANTE: Apenas fechar modal, mas preservar validationData
-                setShowModal(false);
-                
-                // ✅ NÃO limpar validationData para que o botão apareça
-                // setValidationData(null); // ❌ REMOVER esta linha
-                
-                // ✅ Se é o validador, mostrar botão após fechar
-                if (validationData.isValidator) {
-                  setTimeout(() => {
-                    setShowResumeButton(true);
-                  }, 100);
-                }
-              }}
-              title="🎯 Validação de Resposta"
-            >
-              <div className="space-y-4">
-                <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-4">
-                  <div 
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
-                    style={{ 
-                      width: `${(validationData.currentIndex / validationData.totalItems) * 100}%` 
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                {/* Header */}
+                <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+                  <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
+                    {validationData.isValidator ? "✏️ Validação de Resposta" : "👀 Acompanhando Validação"}
+                  </h2>
+                  <button
+                    onClick={() => {
+                      console.log('[GameBoard] 🔒 Fechando modal de validação');
+                      setShowModal(false);
+                      if (validationData.isValidator) {
+                        setTimeout(() => {
+                          setShowResumeButton(true);
+                        }, 100);
+                      }
                     }}
-                  ></div>
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
-                  {validationData.currentIndex} de {validationData.totalItems}
-                </p>
+                
+                {/* Content */}
+                <div className="p-6">
+                  <div className="space-y-4">
+                    <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-4">
+                      <div 
+                        className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                        style={{ 
+                          width: `${(validationData.currentIndex / validationData.totalItems) * 100}%` 
+                        }}
+                      ></div>
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
+                      {validationData.currentIndex} de {validationData.totalItems}
+                    </p>
 
                 <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
                   <p className="text-gray-800 dark:text-gray-200"><strong>Jogador:</strong> {validationData.playerNickname}</p>
@@ -1005,8 +1013,10 @@ function GameBoard({
                         <p>Aguardando validação de <strong>{validationData.validatorNickname}</strong></p>
                     </div>
                 )}
+                  </div>
+                </div>
               </div>
-            </Modal>
+            </div>
           )}
 
           {/* Botões de controle */}

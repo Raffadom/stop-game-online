@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { socket } from "../socket";
-// import Modal from "./Modal"; // Prepared for future use
+import Modal from "./Modal"; // ✅ CORRIGIR: Descomentar import do Modal
 
 function GameBoard({
   roundStarted,
@@ -906,7 +906,6 @@ function GameBoard({
           {/* Validation Modal */}
           {showModal && validationData && (
             <Modal 
-              isOpen={showModal} 
               onClose={() => {
                 console.log('[GameBoard] 🔒 Fechando modal de validação');
                 
@@ -923,16 +922,9 @@ function GameBoard({
                   }, 100);
                 }
               }}
+              title="🎯 Validação de Resposta"
             >
               <div className="space-y-4">
-                <h3 className="text-lg font-bold text-center text-gray-800 dark:text-gray-200">
-                  {validationData.isValidator ? (
-                    <>✏️ Validação de Resposta</>
-                  ) : (
-                    <>👀 Acompanhando Validação</>
-                  )}
-                </h3>
-                
                 <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-4">
                   <div 
                     className="bg-blue-600 h-2 rounded-full transition-all duration-300" 

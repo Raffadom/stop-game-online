@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { socket as _socket } from "../socket";
 import { v4 as uuidv4 } from 'uuid'; // Importe uuid para gerar IDs únicos
-
-// import { SunIcon, MoonIcon } from '@heroicons/react/24/solid'; // Prepared for theme toggle
+import { SunIcon, MoonIcon } from '@heroicons/react/24/solid'; // Prepared for theme toggle
 
 // As props agora incluem onJoinOrCreateRoom, roomError e isConnected do App.jsx
 export default function Home({ onJoinOrCreateRoom, roomError, isConnected, theme, toggleTheme }) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { socket } from './socket';
 import _Home from './components/Home';
 import _Room from './components/Room';

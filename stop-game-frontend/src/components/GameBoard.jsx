@@ -949,7 +949,7 @@ function GameBoard({
                   <p className="text-gray-200"><strong>Jogador:</strong> {validationData.playerNickname}</p>
                   <p className="text-gray-200"><strong>Tema:</strong> {validationData.theme}</p>
                   <p className="text-gray-200"><strong>Resposta:</strong> 
-                      <span className={`ml-2 px-2 py-1 rounded ${
+                      <span className={`ml-2 px-2 py-0.3 rounded ${
                           !validationData.answer || validationData.answer.trim() === "" 
                               ? "bg-gray-600 text-gray-300" 
                               : "bg-green-700 text-green-200"

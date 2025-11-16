@@ -131,10 +131,23 @@ jobs:
 
       - name: Start backend server
         run: |
-          cd stop-game-backend && npm start &
-          sleep 10
+          echo "🚀 Starting backend server for CI..."
+          cd stop-game-backend
+          echo "📁 Current directory: $(pwd)"
+          echo "⚙️ Starting in CI mode..."
+          NODE_ENV=ci node index.js &
+          BACKEND_PID=$!
+          echo "🆔 Backend PID: $BACKEND_PID"
+          echo "⏰ Waiting for backend to start..."
+          sleep 15
+          echo "🔍 Checking if backend is running:"
+          ps aux | grep node | grep -v grep | head -5
+          echo "🔍 Checking port 3001:"
+          netstat -tuln | grep :3001 && echo "✅ Port 3001 is listening" || echo "❌ Port 3001 not listening"
+          echo "🔍 Testing server response:"
+          curl -f http://localhost:3001 && echo "✅ Server responding!" || echo "❌ Server not responding"
         env:
-          NODE_ENV: test
+          NODE_ENV: ci
 
       - name: Start frontend server
         run: |

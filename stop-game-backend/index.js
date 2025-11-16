@@ -1886,9 +1886,14 @@ io.on('connection', (socket) => {
 
 // ✅ Inicializar servidor
 const PORT = process.env.PORT || 3001;
-if (!isTestMode) {
+const isCIMode = process.env.NODE_ENV === 'ci';
+
+if (!isTestMode || isCIMode) {
     server.listen(PORT, () => {
         console.log(`🚀 Servidor rodando na porta ${PORT}`);
+        if (isCIMode) {
+            console.log(`🔧 Modo CI ativo - servidor forçado a iniciar`);
+        }
     });
 } else {
     console.log('🧪 Test mode - servidor não iniciou listen automaticamente');

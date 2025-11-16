@@ -1886,6 +1886,22 @@ io.on('connection', (socket) => {
 
 // ✅ Inicializar servidor
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-    console.log(`🚀 Servidor rodando na porta ${PORT}`);
-});
+if (!isTestMode) {
+    server.listen(PORT, () => {
+        console.log(`🚀 Servidor rodando na porta ${PORT}`);
+    });
+} else {
+    console.log('🧪 Test mode - servidor não iniciou listen automaticamente');
+}
+
+// Exportar objetos e funções para permitir testes de integração
+module.exports = {
+    app,
+    server,
+    io,
+    roomConfigs,
+    gameState,
+    startValidationProcess,
+    completeValidation,
+    applyThemeScoring
+};

@@ -5,10 +5,11 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "jest",
-    "test:unit": "jest --coverage",
+    "test": "jest --forceExit --detectOpenHandles",
+    "test:unit": "jest --coverage --forceExit",
     "test:watch": "jest --watch",
-    "test:integration": "jest --testPathPattern=integration"
+    "test:integration": "jest --testPathPattern=integration --forceExit",
+    "test:quick": "jest unit-tests --forceExit"
   },
   "author": "",
   "license": "ISC",

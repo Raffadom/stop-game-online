@@ -1,0 +1,13 @@
+[build]
+  base = "stop-game-frontend"
+  publish = "stop-game-frontend/dist"
+  command = "npm install --legacy-peer-deps && npm run build"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_VERSION = "10.9.4"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

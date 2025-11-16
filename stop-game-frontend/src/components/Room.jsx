@@ -133,7 +133,7 @@ export default function Room({
   return (
     <div className="flex flex-col min-h-screen max-w-5xl mx-auto px-4 py-6 space-y-8 relative">
       {/* Componente de alerta */}
-      <Alert
+      <_Alert
         message={alertState.message}
         type={alertState.type}
         isVisible={alertState.isVisible}

@@ -945,7 +945,7 @@ function GameBoard({
                       {validationData.currentIndex} de {validationData.totalItems}
                     </p>
 
-                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                <div className="bg-black-50 dark:bg-blue-900/20 p-4 rounded-lg">
                   <p className="text-gray-800 dark:text-gray-200"><strong>Jogador:</strong> {validationData.playerNickname}</p>
                   <p className="text-gray-800 dark:text-gray-200"><strong>Tema:</strong> {validationData.theme}</p>
                   <p className="text-gray-800 dark:text-gray-200"><strong>Resposta:</strong> 

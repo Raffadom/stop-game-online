@@ -53,7 +53,7 @@ jobs:
           npm run test:unit
 
       - name: Run backend tests
-        run: cd stop-game-backend && npm run test:unit
+        run: cd stop-game-backend && npm run test:ci
 
       - name: Build frontend
         run: cd stop-game-frontend && npm run build

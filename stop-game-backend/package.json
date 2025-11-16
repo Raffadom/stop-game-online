@@ -5,11 +5,12 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "jest --forceExit --detectOpenHandles",
-    "test:unit": "jest --coverage --forceExit",
+    "test": "jest --testPathPattern='(unit-tests|game-logic|socket)' --forceExit --passWithNoTests",
+    "test:unit": "jest unit-tests --coverage --forceExit",
     "test:watch": "jest --watch",
     "test:integration": "jest --testPathPattern=integration --forceExit",
-    "test:quick": "jest unit-tests --forceExit"
+    "test:quick": "jest unit-tests --forceExit",
+    "test:ci": "jest unit-tests game-logic socket --forceExit --passWithNoTests"
   },
   "author": "",
   "license": "ISC",

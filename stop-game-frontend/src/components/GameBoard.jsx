@@ -41,6 +41,11 @@ function GameBoard({
   const [_roundScores, _setRoundScores] = useState(null);
   const [finalRanking, setFinalRanking] = useState(null);
   const [answersSubmitted, setAnswersSubmitted] = useState(false);
+  const [reviewAnswers, setReviewAnswers] = useState(null);
+  const [selectedReviewPlayer, setSelectedReviewPlayer] = useState(null);
+  const [activeVote, setActiveVote] = useState(null);
+  const [voteChoice, setVoteChoice] = useState(null);
+  const [voteRemaining, setVoteRemaining] = useState(0);
   
   // ✅ Estados para gerenciar sala
   const [duration, setDuration] = useState(60);
@@ -207,6 +212,20 @@ function GameBoard({
     setAnswers(newAnswers);
   }, [answers]);
 
+  const handleReviewStatus = useCallback((playerId, theme, valid) => {
+    socket.emit('review_answer', { room, playerId, theme, valid });
+  }, [room]);
+
+  const handleOpenVote = useCallback((playerId, theme) => {
+    socket.emit('open_answer_vote', { room, playerId, theme });
+  }, [room]);
+
+  const handleCastVote = useCallback((valid) => {
+    if (!activeVote || activeVote.finished) return;
+    setVoteChoice(valid);
+    socket.emit('cast_answer_vote', { room, valid });
+  }, [activeVote, room]);
+
   // ✅ Função handleValidate (preparada para uso futuro)
   const _handleValidate = useCallback((isValid) => {
     if (!canReveal || !validationData || isValidating || currentValidated) {
@@ -245,6 +264,7 @@ function GameBoard({
             return {
               ...answer,
               answer: validatedAnswer.answer || answer.answer, // ✅ Preservar resposta original
+              valid: validatedAnswer.valid,
               points: validatedAnswer.points,
               reason: validatedAnswer.reason,
               validated: true // ✅ IMPORTANTE: Marcar como validada
@@ -274,6 +294,17 @@ function GameBoard({
       setRoundScore(null);
     }
   }, []);
+
+  useEffect(() => {
+    if (!activeVote) return undefined;
+
+    const updateRemaining = () => {
+      setVoteRemaining(Math.max(0, Math.ceil((activeVote.endsAt - Date.now()) / 1000)));
+    };
+    updateRemaining();
+    const timer = setInterval(updateRemaining, 250);
+    return () => clearInterval(timer);
+  }, [activeVote]);
 
   const handleNoAnswersToValidate = useCallback(() => {
     console.log('[GameBoard] ❌ Nenhuma resposta para validar');
@@ -367,6 +398,20 @@ function GameBoard({
       setHasUnsavedChanges(false);
     };
 
+    const handleRoundReviewUpdated = (data) => {
+      setReviewAnswers(data.answers || []);
+    };
+
+    const handleVoteOpened = (data) => {
+      setVoteChoice(null);
+      setActiveVote(data);
+    };
+
+    const handleVoteFinished = (data) => {
+      setActiveVote(prev => prev ? { ...prev, finished: true, ...data } : prev);
+      setVoteRemaining(0);
+    };
+
     const handleRoundStarted = (data) => {
       console.log('[GameBoard] Rodada iniciada com letra:', data.letter);
       setIsRoundActive(true);
@@ -450,6 +495,10 @@ function GameBoard({
       setShowModal(false);
       setAnswersSubmitted(false);
       setCurrentValidated(false);
+      setReviewAnswers(null);
+      setSelectedReviewPlayer(null);
+      setActiveVote(null);
+      setVoteChoice(null);
     };
 
     const handleValidationStart = (data) => {
@@ -466,10 +515,12 @@ function GameBoard({
       setValidationData({
         ...data,
         isValidator: myUserId === data.validatorId,
-        myUserId: myUserId
+        myUserId: myUserId,
+        automatic: data.automatic || data.validationMode === 'automatic'
       });
       
       setShowModal(true);
+      setIsValidating(Boolean(data.automatic || data.validationMode === 'automatic'));
       setShowResumeButton(false); // ✅ Esconder botão quando modal abre
     };
 
@@ -481,6 +532,8 @@ function GameBoard({
         showResult: true,
         resultData: {
           valid: data.valid,
+          status: data.status,
+          reason: data.reason,
           playerNickname: data.playerNickname,
           answer: data.answer,
           theme: data.theme
@@ -500,8 +553,10 @@ function GameBoard({
       console.log('[GameBoard] 🏁 Validação completa:', data);
       
       setShowModal(false);
+      setIsValidating(false);
       setValidationData(null); // ✅ Apenas aqui limpar os dados
       setShowResumeButton(false); // ✅ E esconder o botão
+      setReviewAnswers(data.allAnswers || []);
       
       if (data.allAnswers) {
         console.log('[GameBoard] 📝 Mantendo respostas visíveis após validação');
@@ -572,6 +627,9 @@ function GameBoard({
     socket.on("answer_validated", handleAnswerValidated);
     socket.on("validation_complete", handleValidationComplete);
     socket.on("validation_complete_for_player", handleValidationCompleteForPlayer);
+    socket.on('round_review_updated', handleRoundReviewUpdated);
+    socket.on('vote_opened', handleVoteOpened);
+    socket.on('vote_finished', handleVoteFinished);
     socket.on("game_ended", handleGameEnded);
     socket.on("no_answers_to_validate", handleNoAnswersToValidate);
     socket.on("reveal", handleReveal);
@@ -591,6 +649,9 @@ function GameBoard({
       socket.off("answer_validated", handleAnswerValidated);
       socket.off("validation_complete", handleValidationComplete);
       socket.off("validation_complete_for_player", handleValidationCompleteForPlayer);
+      socket.off('round_review_updated', handleRoundReviewUpdated);
+      socket.off('vote_opened', handleVoteOpened);
+      socket.off('vote_finished', handleVoteFinished);
       socket.off("game_ended", handleGameEnded);
       socket.off("no_answers_to_validate", handleNoAnswersToValidate);
       socket.off("reveal", handleReveal);
@@ -885,6 +946,122 @@ function GameBoard({
             </section>
           )}
 
+          {reviewAnswers && reviewAnswers.length > 0 && !roundStarted && !finalRanking && (
+            <section className="mt-8 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+              <h3 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">
+                Respostas dos participantes
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Selecione um participante para consultar as respostas, status e pontuação.
+              </p>
+              <div className="flex flex-wrap gap-2 mb-5">
+                {reviewAnswers.map(player => (
+                  <button
+                    key={player.playerId}
+                    onClick={() => setSelectedReviewPlayer(selectedReviewPlayer === player.playerId ? null : player.playerId)}
+                    className={`px-4 py-2 rounded-lg font-semibold transition-colors ${
+                      selectedReviewPlayer === player.playerId
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-blue-100 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600'
+                    }`}
+                  >
+                    {player.nickname}
+                  </button>
+                ))}
+              </div>
+
+              {reviewAnswers.filter(player => player.playerId === selectedReviewPlayer).map(player => (
+                <div key={player.playerId} className="space-y-3">
+                  <h4 className="text-lg font-bold text-gray-800 dark:text-gray-100">{player.nickname}</h4>
+                  {player.answers.map(answer => (
+                    <div key={`${player.playerId}-${answer.theme}`} className="flex flex-col md:flex-row md:items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-700">
+                      <div className="flex-1">
+                        <div className="font-semibold text-gray-800 dark:text-gray-100">{answer.theme}</div>
+                        <div className="text-gray-700 dark:text-gray-200">{answer.answer || 'Vazia'}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">{answer.reason || 'Sem observação'}</div>
+                      </div>
+                      <div className="font-bold text-gray-700 dark:text-gray-100 min-w-24">
+                        {answer.valid === true ? '✅ Válida' : answer.valid === false ? '❌ Inválida' : '⚠️ Pendente'}
+                        <div className="text-sm font-normal">{answer.points || 0} pontos</div>
+                      </div>
+                      {isAdmin && (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleReviewStatus(player.playerId, answer.theme, answer.valid !== true)}
+                            className={`px-3 py-2 rounded-md text-white text-sm font-semibold ${answer.valid === true ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
+                          >
+                            {answer.valid === true ? 'Marcar inválida' : 'Marcar válida'}
+                          </button>
+                          <button
+                            onClick={() => handleOpenVote(player.playerId, answer.theme)}
+                            className="px-3 py-2 rounded-md bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold"
+                          >
+                            Votar
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </section>
+          )}
+
+          {activeVote && (
+            <div
+              className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) setActiveVote(null);
+              }}
+            >
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg p-6 text-center">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Votação da sala</h3>
+                  <button
+                    type="button"
+                    aria-label="Fechar votação"
+                    title="Fechar votação"
+                    onClick={() => setActiveVote(null)}
+                    className="text-gray-500 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white text-2xl px-2"
+                  >
+                    ×
+                  </button>
+                </div>
+                <p className="mt-2 text-gray-600 dark:text-gray-300">
+                  {activeVote.playerNickname} respondeu em <strong>{activeVote.theme}</strong>:
+                </p>
+                <p className="my-5 text-2xl font-bold text-blue-700 dark:text-blue-300">{activeVote.answer || 'Vazia'}</p>
+                {!activeVote.finished ? (
+                  <>
+                    <div className="text-4xl font-bold text-orange-600 mb-5">{voteRemaining}s</div>
+                    <p className="text-gray-700 dark:text-gray-200 mb-4">Na sua opinião, a resposta é válida ou inválida?</p>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => handleCastVote(true)}
+                        disabled={voteChoice !== null}
+                        className={`flex-1 px-4 py-3 rounded-lg text-white font-semibold ${voteChoice === true ? 'bg-green-800' : 'bg-green-600 hover:bg-green-700'} disabled:opacity-70`}
+                      >
+                        ✅ Válida
+                      </button>
+                      <button
+                        onClick={() => handleCastVote(false)}
+                        disabled={voteChoice !== null}
+                        className={`flex-1 px-4 py-3 rounded-lg text-white font-semibold ${voteChoice === false ? 'bg-red-800' : 'bg-red-600 hover:bg-red-700'} disabled:opacity-70`}
+                      >
+                        ❌ Inválida
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className={`p-4 rounded-lg ${activeVote.tie ? 'bg-yellow-100 text-yellow-800' : activeVote.valid ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                    <div className="text-xl font-bold">{activeVote.tie ? '⚖️ Empate: status mantido' : activeVote.valid ? '✅ Maioria: válida' : '❌ Maioria: inválida'}</div>
+                    <div className="text-sm mt-1">Válidos: {activeVote.validVotes} | Inválidos: {activeVote.invalidVotes}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* STOP Button */}
           {roundStarted && !roundEnded && !stopClickedByMe && !finalRanking && (
             <div className="text-center mt-4">
@@ -910,7 +1087,7 @@ function GameBoard({
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
                   <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
-                    {validationData.isValidator ? "✏️ Validação de Resposta" : "👀 Acompanhando Validação"}
+                    {validationData.automatic ? "🤖 Correção Automática" : validationData.isValidator ? "✏️ Validação de Resposta" : "👀 Acompanhando Validação"}
                   </h2>
                   <button
                     onClick={() => {
@@ -922,6 +1099,7 @@ function GameBoard({
                         }, 100);
                       }
                     }}
+                    disabled={validationData.automatic}
                     className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full"
                   >
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -969,22 +1147,36 @@ function GameBoard({
                 </div>
 
                 {validationData.showResult && validationData.resultData && (
-                    <div className={`p-4 rounded-lg text-center ${
-                        validationData.resultData.valid 
-                            ? 'bg-green-100 dark:bg-green-900/30 border-green-500 border-2' 
-                            : 'bg-red-100 dark:bg-red-900/30 border-red-500 border-2'
-                    }`}>
+                  <div className={`p-4 rounded-lg text-center ${
+                    validationData.resultData.status === 'failed'
+                      ? 'bg-yellow-100 dark:bg-yellow-900/30 border-yellow-500 border-2'
+                      : validationData.resultData.valid
+                        ? 'bg-green-100 dark:bg-green-900/30 border-green-500 border-2'
+                        : 'bg-red-100 dark:bg-red-900/30 border-red-500 border-2'
+                  }`}>
                         <p className="font-bold text-lg text-gray-800 dark:text-gray-200">
-                            {validationData.resultData.valid ? '✅ VÁLIDA' : '❌ INVÁLIDA'}
+                      {validationData.resultData.status === 'failed'
+                        ? '⚠️ API INDISPONÍVEL'
+                        : validationData.resultData.valid ? '✅ VÁLIDA' : '❌ INVÁLIDA'}
                         </p>
                         <p className="text-sm mt-1 text-gray-600 dark:text-gray-400">
                             {validationData.resultData.playerNickname} - {validationData.resultData.theme}: "{validationData.resultData.answer}"
                         </p>
+                        {validationData.resultData.reason && (
+                          <p className="text-xs mt-1 text-gray-500 dark:text-gray-400">{validationData.resultData.reason}</p>
+                        )}
                     </div>
                 )}
 
+                    {validationData.automatic && !validationData.showResult && (
+                      <div className="text-center text-blue-700 dark:text-blue-300 text-sm">
+                        <p className="font-semibold">Validando resposta automaticamente...</p>
+                        <p className="mt-1">Aguarde a conclusão da correção.</p>
+                      </div>
+                    )}
+
                 {/* ✅ CORRIGIR: Apenas botões de validação para validador */}
-                {validationData.isValidator && !validationData.showResult && (
+                    {validationData.isValidator && !validationData.automatic && !validationData.showResult && (
                     <div className="flex gap-4">
                         <button
                             className="flex-1 bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition-colors font-medium"
@@ -1008,7 +1200,7 @@ function GameBoard({
                 )}
 
                 {/* Para espectadores: apenas texto informativo */}
-                {!validationData.isValidator && (
+                {!validationData.isValidator && !validationData.automatic && (
                     <div className="text-center text-gray-600 dark:text-gray-400 text-sm">
                         <p>Aguardando validação de <strong>{validationData.validatorNickname}</strong></p>
                     </div>

@@ -44,6 +44,8 @@ function App() {
 
   // ✅ NOVO: Estado para filtro de letras
   const [excludeXWYZ, setExcludeXWYZ] = useState(false);
+  const [validationMode, setValidationMode] = useState('manual');
+  const [requireAccents, setRequireAccents] = useState(false);
 
   const timerRef = useRef(null);
   const [timeLeft, setTimeLeft] = useState(0);
@@ -211,12 +213,18 @@ function App() {
     setLetter(config.currentLetter || '');
     setIsRoomSaved(config.isSaved || false);
     setExcludeXWYZ(config.excludeXWYZ || false); // ✅ NOVO: Filtro de letras
+    setValidationMode(config.validationMode === 'automatic' ? 'automatic' : 'manual');
+    setRequireAccents(Boolean(config.requireAccents));
   }, []);
 
   // ✅ NOVO: Handler para atualização do filtro de letras
   const handleLetterFilterUpdated = useCallback((data) => {
     console.log('[App] Filtro de letras atualizado:', data);
     setExcludeXWYZ(data.excludeXWYZ);
+  }, []);
+
+  const handleValidationModeUpdated = useCallback((data) => {
+    setValidationMode(data.validationMode === 'automatic' ? 'automatic' : 'manual');
   }, []);
 
   const handleRoomSavedSuccess = useCallback((data) => {
@@ -517,6 +525,7 @@ function App() {
     socket.on('start_validation', handleValidationStarted);
     socket.on('validation_complete', handleValidationComplete);
     socket.on('letter_filter_updated', handleLetterFilterUpdated); // ✅ NOVO
+    socket.on('validation_mode_updated', handleValidationModeUpdated);
 
     return () => {
       console.log('[App] Cleaning up socket listeners');
@@ -538,6 +547,7 @@ function App() {
       socket.off('start_validation', handleValidationStarted);
       socket.off('validation_complete', handleValidationComplete);
       socket.off('letter_filter_updated', handleLetterFilterUpdated); // ✅ NOVO
+      socket.off('validation_mode_updated', handleValidationModeUpdated);
     };
   }, [
     userId,
@@ -558,7 +568,8 @@ function App() {
     handlePlayerDisconnected,
     handleValidationStarted,
     handleValidationComplete,
-    handleLetterFilterUpdated // ✅ NOVO
+    handleLetterFilterUpdated, // ✅ NOVO
+    handleValidationModeUpdated
   ]);
 
   // ✅ Detectar mudanças de visibilidade para reconectar
@@ -671,6 +682,10 @@ function App() {
             toggleTheme={toggleTheme}
             excludeXWYZ={excludeXWYZ} // ✅ NOVO: Filtro de letras
             setExcludeXWYZ={setExcludeXWYZ} // ✅ NOVO: Setter do filtro
+            validationMode={validationMode}
+            setValidationMode={setValidationMode}
+            requireAccents={requireAccents}
+            setRequireAccents={setRequireAccents}
           />
         </div>
       )}

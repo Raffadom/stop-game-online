@@ -5,6 +5,7 @@ const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
 const admin = require('firebase-admin');
+const { validateAnswer } = require('./validation-service');
 
 // ✅ CORRIGIR: Inicialização do Firebase com modo de teste
 let db;
@@ -187,6 +188,10 @@ function sanitizeRoomConfig(config) {
     return cleanConfig;
 }
 
+function normalizeValidationMode(mode) {
+    return mode === 'automatic' ? 'automatic' : 'manual';
+}
+
 // ✅ MELHORAR: Função de salvar (garantir local correto)
 async function saveRoomConfigToFirestore(roomId, config) {
     try {
@@ -204,7 +209,9 @@ async function saveRoomConfigToFirestore(roomId, config) {
             isSaved: true,
             lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
             migratedFrom: 'artifacts', // ✅ Marcar se foi migrada
-            excludeXWYZ: config.excludeXWYZ || false // ✅ NOVO: Salvar filtro de letras
+            excludeXWYZ: config.excludeXWYZ || false, // ✅ NOVO: Salvar filtro de letras
+            validationMode: normalizeValidationMode(config.validationMode),
+            requireAccents: Boolean(config.requireAccents)
         };
         
         console.log(`[Firestore] 🔍 ANTES de salvar - Jogadores na configuração:`, Object.keys(config.players || {}));
@@ -386,6 +393,8 @@ function initializeRoomState(room) {
             players: {},
             themes: ['Nome', 'Cidade', 'País', 'Marca', 'Cor', 'Animal'],
             duration: 180,
+            validationMode: 'manual',
+            requireAccents: false,
             createdAt: new Date(),
             validationInProgress: false
         });
@@ -462,6 +471,7 @@ function processNextValidation(room) {
                 currentValidation: config.currentValidation,
                 validatorId: config.validatorId,
                 playersAnswers: config.playersAnswers,
+            validationMode: config.validationMode,
                 roomId: room,
                 updatedAt: new Date().toISOString()
             };
@@ -469,7 +479,15 @@ function processNextValidation(room) {
             saveValidationStateToFirestore(room, validationState);
             
             // ✅ Emitir próxima validação
-            io.to(room).emit("start_validation", nextItem);
+            io.to(room).emit("start_validation", {
+                ...nextItem,
+                automatic: config.validationMode === 'automatic',
+                validationMode: config.validationMode
+            });
+
+            if (config.validationMode === 'automatic') {
+                processAutomaticValidation(room);
+            }
         } else {
             console.log(`[Socket.io] 🏁 Completando validação para sala ${room}`);
             completeValidation(room);
@@ -477,6 +495,46 @@ function processNextValidation(room) {
     } catch (error) {
         console.error('[Socket.io] Error in processNextValidation:', error);
     }
+}
+
+async function processAutomaticValidation(room) {
+    const config = roomConfigs[room];
+    if (!config || !config.validationQueue || !config.validationInProgress) return;
+
+    const currentItem = config.validationQueue[config.currentValidation];
+    if (!currentItem) {
+        completeValidation(room);
+        return;
+    }
+
+    const result = await validateAnswer({
+        answer: currentItem.answer,
+        letter: config.currentLetter,
+        theme: currentItem.theme,
+        requireAccents: Boolean(config.requireAccents)
+    });
+
+    const player = config.playersAnswers.find(item => item.playerId === currentItem.playerId);
+    const themeIndex = config.themes.indexOf(currentItem.theme);
+    const answer = player && themeIndex !== -1 ? player.answers[themeIndex] : null;
+
+    if (answer) {
+        answer.valid = result.status === 'valid';
+        answer.validationStatus = result.status;
+        answer.reason = result.reason;
+    }
+
+    io.to(room).emit("answer_validated", {
+        valid: result.status === 'failed' ? null : result.status === 'valid',
+        status: result.status,
+        reason: result.reason,
+        errorCode: result.errorCode,
+        playerNickname: currentItem.playerNickname,
+        answer: currentItem.answer,
+        theme: currentItem.theme
+    });
+
+    setTimeout(() => processNextValidation(room), 200);
 }
 
 // Sistema de pontuação inteligente por tema
@@ -507,6 +565,13 @@ function applyThemeScoring(room, themeIndex, allAnswers, themes) {
             if (!normalizedAnswer || normalizedAnswer.length === 0) {
                 answer.points = 0;
                 answer.reason = "Resposta vazia";
+                return;
+            }
+
+            if ([...normalizedAnswer].length < 2) {
+                answer.points = 0;
+                answer.valid = false;
+                answer.reason = "Resposta deve ter pelo menos duas letras";
                 return;
             }
         });
@@ -547,6 +612,110 @@ function applyThemeScoring(room, themeIndex, allAnswers, themes) {
     } catch (error) {
         console.error(`[Scoring] Erro ao aplicar pontuação para tema ${themeIndex}:`, error);
     }
+}
+
+function emitRoundReview(room) {
+    const config = roomConfigs[room];
+    if (!config || !config.playersAnswers) return;
+
+    io.to(room).emit('round_review_updated', {
+        answers: config.playersAnswers,
+        roundScores: config.roundScores || {}
+    });
+}
+
+function recalculateRoundScores(room) {
+    const config = roomConfigs[room];
+    if (!config || !config.playersAnswers) return;
+
+    const previousScores = config.roundScores || {};
+    config.playersAnswers.forEach(player => {
+        player.answers.forEach(answer => {
+            answer.points = null;
+        });
+    });
+
+    config.themes.forEach((theme, themeIndex) => {
+        applyThemeScoring(room, themeIndex, config.playersAnswers, config.themes);
+    });
+
+    config.roundScores = {};
+    config.playersAnswers.forEach(player => {
+        const roundScore = player.answers.reduce((total, answer) => total + (answer.points || 0), 0);
+        const previousRoundScore = previousScores[player.playerId] || 0;
+        const delta = roundScore - previousRoundScore;
+        config.roundScores[player.playerId] = roundScore;
+
+        const playerConfig = config.players && config.players[player.playerId];
+        if (playerConfig) {
+            playerConfig.totalScore = (playerConfig.totalScore || 0) + delta;
+        }
+
+        const roomSockets = io.sockets.adapter.rooms.get(room);
+        if (roomSockets) {
+            for (const socketId of roomSockets) {
+                const playerSocket = io.sockets.sockets.get(socketId);
+                if (playerSocket && playerSocket.userId === player.playerId) {
+                    playerSocket.totalScore = (playerSocket.totalScore || 0) + delta;
+                    playerSocket.emit('validation_complete_for_player', {
+                        myScore: roundScore,
+                        myTotalScore: playerSocket.totalScore,
+                        myAnswers: player.answers.map(answer => ({
+                            theme: answer.theme,
+                            answer: answer.answer,
+                            valid: answer.valid,
+                            points: answer.points,
+                            reason: answer.reason,
+                            validated: true
+                        }))
+                    });
+                    break;
+                }
+            }
+        }
+    });
+}
+
+function applyReviewStatus(room, playerId, theme, valid) {
+    const config = roomConfigs[room];
+    if (!config || !config.playersAnswers || typeof valid !== 'boolean') return false;
+
+    const player = config.playersAnswers.find(item => item.playerId === playerId);
+    const answer = player && player.answers.find(item => item.theme === theme);
+    if (!answer) return false;
+
+    answer.valid = valid;
+    answer.validationStatus = valid ? 'valid' : 'invalid';
+    answer.reason = valid ? 'Validada pelo administrador' : 'Invalidada pelo administrador';
+    recalculateRoundScores(room);
+    emitRoundReview(room);
+    return true;
+}
+
+function finishVote(room) {
+    const config = roomConfigs[room];
+    const vote = config && config.activeVote;
+    if (!vote) return;
+
+    const validVotes = Object.values(vote.votes).filter(value => value === true).length;
+    const invalidVotes = Object.values(vote.votes).filter(value => value === false).length;
+    const player = config.playersAnswers.find(item => item.playerId === vote.playerId);
+    const answer = player && player.answers.find(item => item.theme === vote.theme);
+    const tie = validVotes === invalidVotes;
+    const valid = tie ? answer && answer.valid === true : validVotes > invalidVotes;
+    if (!tie) applyReviewStatus(room, vote.playerId, vote.theme, valid);
+
+    io.to(room).emit('vote_finished', {
+        playerId: vote.playerId,
+        theme: vote.theme,
+        valid,
+        validVotes,
+        invalidVotes,
+        tie,
+        totalVotes: validVotes + invalidVotes
+    });
+    clearTimeout(vote.timeoutId);
+    delete config.activeVote;
 }
 
 // ✅ Função para iniciar processo de validação
@@ -677,12 +846,15 @@ function startValidationProcess(room, validatorId) {
             return;
         }
         
+        config.validationMode = normalizeValidationMode(config.validationMode);
+
         // ✅ Configurar estado de validação
         const validationState = {
             validationQueue: validationQueue,
             currentValidation: 0,
             validatorId: validatorId,
             playersAnswers: allAnswers,
+            validationMode: config.validationMode,
             roomId: room,
             startedAt: new Date().toISOString()
         };
@@ -700,7 +872,15 @@ function startValidationProcess(room, validatorId) {
         const firstItem = validationQueue[0];
         console.log(`[Socket.io] 🎯 Enviando primeira validação:`, firstItem);
         
-        io.to(room).emit("start_validation", firstItem);
+        io.to(room).emit("start_validation", {
+            ...firstItem,
+            automatic: config.validationMode === 'automatic',
+            validationMode: config.validationMode
+        });
+
+        if (config.validationMode === 'automatic') {
+            processAutomaticValidation(room);
+        }
         
     } catch (error) {
         console.error('[Socket.io] Erro no processo de validação:', error);
@@ -723,12 +903,14 @@ function completeValidation(room) {
             console.log(`[Socket.io] 🎯 Calculando pontos para tema: ${theme}`);
             applyThemeScoring(room, themeIndex, config.playersAnswers, config.themes);
         });
+        config.roundScores = {};
         
         // ✅ Enviar resultados individuais para cada jogador
         config.playersAnswers.forEach(player => {
             const roundScore = player.answers.reduce((total, answer) => {
                 return total + (answer.points || 0);
             }, 0);
+            config.roundScores[player.playerId] = roundScore;
             
             // ✅ Encontrar socket do jogador
             const roomSockets = io.sockets.adapter.rooms.get(room);
@@ -767,6 +949,7 @@ function completeValidation(room) {
                     myAnswers: player.answers.map(answer => ({
                         theme: answer.theme,
                         answer: answer.answer,
+                        valid: answer.valid,
                         points: answer.points,
                         reason: answer.reason,
                         validated: true
@@ -791,6 +974,7 @@ function completeValidation(room) {
         delete config.currentValidation;
         delete config.validatorId;
         config.validationInProgress = false;
+        config.reviewAvailable = true;
         
         // ✅ IMPORTANTE: Limpar estado do Firestore
         clearValidationStateFromFirestore(room);
@@ -798,8 +982,10 @@ function completeValidation(room) {
         // ✅ Notificar que validação terminou
         io.to(room).emit("validation_complete", {
             message: "Validação completa!",
-            allAnswers: config.playersAnswers
+            allAnswers: config.playersAnswers,
+            roundScores: config.roundScores
         });
+        emitRoundReview(room);
         
     } catch (error) {
         console.error('[Socket.io] Error in completeValidation:', error);
@@ -1024,7 +1210,9 @@ io.on('connection', (socket) => {
                         roundEnded: false,
                         currentLetter: '',
                         validationInProgress: false,
-                        excludeXWYZ: savedConfig.excludeXWYZ || false // ✅ NOVO: Filtro de letras
+                        excludeXWYZ: savedConfig.excludeXWYZ || false, // ✅ NOVO: Filtro de letras
+                        validationMode: normalizeValidationMode(savedConfig.validationMode),
+                        requireAccents: Boolean(savedConfig.requireAccents)
                     };
                     
                     roomConfigs[room] = roomConfig;
@@ -1043,7 +1231,9 @@ io.on('connection', (socket) => {
                         currentLetter: '',
                         isSaved: false,
                         validationInProgress: false,
-                        excludeXWYZ: false // ✅ NOVO: Por padrão, incluir todas as letras
+                        excludeXWYZ: false, // ✅ NOVO: Por padrão, incluir todas as letras
+                        validationMode: 'manual',
+                        requireAccents: false
                     };
                     
                     roomConfigs[room] = roomConfig;
@@ -1067,6 +1257,7 @@ io.on('connection', (socket) => {
                     roomConfig.validatorId = savedValidationState.validatorId;
                     roomConfig.playersAnswers = savedValidationState.playersAnswers;
                     roomConfig.validationInProgress = true;
+                    roomConfig.validationMode = normalizeValidationMode(savedValidationState.validationMode || roomConfig.validationMode);
                 } else {
                     console.log(`[Socket.io] 🗑️ Estado de validação órfão detectado - limpando...`);
                     console.log(`[Socket.io] - Validador existe: ${validatorExists}, Jogadores existem: ${playersExist}`);
@@ -1158,10 +1349,18 @@ io.on('connection', (socket) => {
                         roundEnded: roomConfig.roundEnded || false,
                         currentLetter: roomConfig.currentLetter || '',
                         isSaved: roomConfig.isSaved || false,
-                        validationInProgress: roomConfig.validationInProgress || false,
+                    validationInProgress: roomConfig.validationInProgress || false,
+                    validationMode: normalizeValidationMode(roomConfig.validationMode),
+                        requireAccents: Boolean(roomConfig.requireAccents),
                         createdAt: roomConfig.createdAt,
                         creatorId: roomConfig.creatorId
                     });
+                    if (roomConfig.reviewAvailable && roomConfig.playersAnswers) {
+                        socket.emit('round_review_updated', {
+                            answers: roomConfig.playersAnswers,
+                            roundScores: roomConfig.roundScores || {}
+                        });
+                    }
                     
                     // ✅ Verificar se validação ainda é válida na reconexão
                     if (roomConfig.validationInProgress && roomConfig.validationQueue) {
@@ -1293,9 +1492,17 @@ io.on('connection', (socket) => {
                 currentLetter: roomConfig.currentLetter || '',
                 isSaved: roomConfig.isSaved || false,
                 validationInProgress: roomConfig.validationInProgress || false,
+                        validationMode: normalizeValidationMode(roomConfig.validationMode),
+                        requireAccents: Boolean(roomConfig.requireAccents),
                 createdAt: roomConfig.createdAt,
                 creatorId: roomConfig.creatorId
             });
+            if (roomConfig.reviewAvailable && roomConfig.playersAnswers) {
+                socket.emit('round_review_updated', {
+                    answers: roomConfig.playersAnswers,
+                    roundScores: roomConfig.roundScores || {}
+                });
+            }
 
             socket.to(room).emit("players_update", allPlayers);
             
@@ -1458,6 +1665,30 @@ io.on('connection', (socket) => {
         } catch (error) {
             console.error('[Socket.io] ❌ Erro ao atualizar filtro de letras:', error);
         }
+    });
+
+    socket.on('update_validation_mode', ({ room, validationMode }) => {
+        const config = roomConfigs[room];
+        if (!config || socket.userId !== config.creatorId || config.roundActive || config.validationInProgress) {
+            socket.emit('room_error', { message: 'O modo de correção só pode ser alterado pelo administrador antes da rodada' });
+            return;
+        }
+
+        config.validationMode = normalizeValidationMode(validationMode);
+        config.isSaved = false;
+        emitRoomConfig(room, config);
+    });
+
+    socket.on('update_accent_rule', ({ room, requireAccents }) => {
+        const config = roomConfigs[room];
+        if (!config || socket.userId !== config.creatorId || config.roundActive || config.validationInProgress) {
+            socket.emit('room_error', { message: 'A regra de acentos só pode ser alterada pelo administrador antes da rodada' });
+            return;
+        }
+
+        config.requireAccents = Boolean(requireAccents);
+        config.isSaved = false;
+        emitRoomConfig(room, config);
     });
 
     // ✅ CORRIGIR: Handler save_room para usar a função correta (linha ~950)
@@ -1656,6 +1887,60 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('review_answer', ({ room, playerId, theme, valid }) => {
+        const config = roomConfigs[room];
+        if (!config || socket.userId !== config.creatorId || !config.reviewAvailable) {
+            socket.emit('room_error', { message: 'Apenas o administrador pode revisar respostas após a correção' });
+            return;
+        }
+
+        if (!applyReviewStatus(room, playerId, theme, valid)) {
+            socket.emit('room_error', { message: 'Resposta não encontrada para revisão' });
+        }
+    });
+
+    socket.on('open_answer_vote', ({ room, playerId, theme }) => {
+        const config = roomConfigs[room];
+        if (!config || socket.userId !== config.creatorId || !config.reviewAvailable) {
+            socket.emit('room_error', { message: 'A votação só pode ser aberta pelo administrador após a correção' });
+            return;
+        }
+
+        if (config.activeVote) {
+            socket.emit('room_error', { message: 'Já existe uma votação em andamento' });
+            return;
+        }
+
+        const player = config.playersAnswers.find(item => item.playerId === playerId);
+        const answer = player && player.answers.find(item => item.theme === theme);
+        if (!answer) {
+            socket.emit('room_error', { message: 'Resposta não encontrada para votação' });
+            return;
+        }
+
+        const endsAt = Date.now() + 15000;
+        const timeoutId = setTimeout(() => finishVote(room), 15000);
+        config.activeVote = { playerId, playerNickname: player.nickname, theme, answer: answer.answer, votes: {}, endsAt, timeoutId };
+        io.to(room).emit('vote_opened', {
+            playerId,
+            playerNickname: player.nickname,
+            theme,
+            answer: answer.answer,
+            endsAt,
+            durationSeconds: 15
+        });
+    });
+
+    socket.on('cast_answer_vote', ({ room, valid }) => {
+        const config = roomConfigs[room];
+        if (!config || !config.activeVote || typeof valid !== 'boolean' || !socket.userId) return;
+
+        config.activeVote.votes[socket.userId] = valid;
+        const voters = Object.keys(config.players || {});
+        const answered = Object.keys(config.activeVote.votes).filter(userId => voters.includes(userId)).length;
+        if (answered >= voters.length) finishVote(room);
+    });
+
     socket.on("new_round", async ({ room, resetLetters = false }) => {
         try {
             const config = roomConfigs[room];
@@ -1674,6 +1959,12 @@ io.on('connection', (socket) => {
             
             delete config.lastRoundAnswers;
             delete config.playersAnswers;
+            delete config.roundScores;
+            delete config.reviewAvailable;
+            if (config.activeVote) {
+                clearTimeout(config.activeVote.timeoutId);
+                delete config.activeVote;
+            }
             
             const roomSockets = io.sockets.adapter.rooms.get(room);
             if (roomSockets) {
@@ -1701,6 +1992,11 @@ io.on('connection', (socket) => {
         try {
             const config = roomConfigs[room];
             if (!config || config.gameEnded) return;
+
+            if (config.validationInProgress) {
+                socket.emit('room_error', { message: 'Aguarde a conclusão da correção antes de encerrar a partida' });
+                return;
+            }
 
             config.gameEnded = true;
 
@@ -1742,7 +2038,9 @@ io.on('connection', (socket) => {
                 roundEnded: config.roundEnded || false,
                 currentLetter: config.currentLetter || '',
                 isSaved: config.isSaved || false,
-                validationInProgress: config.validationInProgress || false
+                validationInProgress: config.validationInProgress || false,
+                validationMode: normalizeValidationMode(config.validationMode),
+                requireAccents: Boolean(config.requireAccents)
             });
         }
     });

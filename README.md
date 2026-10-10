@@ -58,15 +58,34 @@ O Stop Online é uma versão digital fiel ao jogo tradicional de palavras, onde 
 
 ### 🏆 **Sistema de Validação e Pontuação**
 - **Validação por juiz**: Admin ou jogador designado valida as respostas
+- **Modo automático**: O administrador pode escolher correção manual ou automática antes de iniciar a rodada
+- **Regra de acentos**: O administrador pode aceitar respostas com ou sem acento ou exigir a grafia acentuada
+- **API gratuita**: O modo automático consulta o Datamuse no backend, sem expor credenciais no navegador
+- **Falhas controladas**: Timeout ou indisponibilidade da API marca a resposta como falha e não interrompe a rodada
 - **Processo tema por tema**: Validação organizada por categoria
 - **Pontuação inteligente**:
   - **100 pontos**: Resposta única e válida
   - **50 pontos**: Resposta repetida mas válida
   - **0 pontos**: Resposta inválida ou vazia
-- **Tratamento especial para respostas de 1 letra**:
-  - Se única e validada pelo juiz: 100 pontos
-  - Se repetida e validada pelo juiz: 50 pontos
-  - Se invalidada pelo juiz: 0 pontos
+- **Respostas com uma única letra**: são inválidas automaticamente e recebem 0 pontos
+
+#### Configuração da validação automática
+
+O modo automático usa uma estratégia híbrida e gratuita, sem chave:
+
+- `IBGE Localidades` para municípios brasileiros;
+- `i18n-iso-countries` para países e traduções em português;
+- `OpenStreetMap Nominatim` para cidades internacionais;
+- catálogo local para animais comuns, incluindo `rinoceronte` e `hipopótamo`;
+- `Datamuse` como fallback para categorias gerais.
+
+O backend valida localmente a letra inicial e exige pelo menos duas letras. Para categorias gerais, o endpoint do Datamuse pode ser substituído por outro compatível através de `VALIDATION_API_URL`.
+
+Por padrão, acentos são opcionais: `Hipopótamo` e `Hipopotamo` podem ser aceitos como a mesma resposta. Quando `Acento obrigatório` estiver selecionado, a forma sem acento será considerada inválida.
+
+A capitalização não interfere na validação: `rinoceronte`, `Rinoceronte` e `RINOCERONTE` são tratados igualmente. O catálogo local de animais evita que o Datamuse retorne uma tradução em inglês ou uma sugestão aproximada em vez da palavra portuguesa exata.
+
+As fontes geográficas têm cobertura muito melhor para cidades e países, mas o Datamuse ainda não classifica semanticamente marcas, filmes ou categorias específicas. O modo manual continua disponível e é o padrão para salas antigas e novas.
 
 ### 📊 **Sistema de Pontuação e Rankings**
 - **Pontuação por tema**: Visualização individual de cada categoria

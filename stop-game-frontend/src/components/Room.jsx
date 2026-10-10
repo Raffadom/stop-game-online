@@ -62,6 +62,10 @@ export default function Room({
   toggleTheme,
   excludeXWYZ,
   setExcludeXWYZ,
+  validationMode,
+  setValidationMode,
+  requireAccents,
+  setRequireAccents,
 }) {
   const [showCopiedMessage, setShowCopiedMessage] = useState(false);
 
@@ -74,6 +78,18 @@ export default function Room({
       setExcludeXWYZ(true);
       socket.emit('update_letter_filter', { room, excludeXWYZ: true });
     }
+  };
+
+  const handleValidationModeChange = (event) => {
+    const nextMode = event.target.value === 'automatic' ? 'automatic' : 'manual';
+    setValidationMode(nextMode);
+    socket.emit('update_validation_mode', { room, validationMode: nextMode });
+  };
+
+  const handleAccentRuleChange = (event) => {
+    const nextValue = event.target.value === 'required';
+    setRequireAccents(nextValue);
+    socket.emit('update_accent_rule', { room, requireAccents: nextValue });
   };
 
   useEffect(() => {
@@ -218,6 +234,39 @@ export default function Room({
                   Menos X, W, Y, Z
                 </span>
               </label>
+            </div>
+            <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+              <label htmlFor="validation-mode" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Correção:
+              </label>
+              <select
+                id="validation-mode"
+                value={validationMode}
+                onChange={handleValidationModeChange}
+                disabled={roundStarted || roundEnded}
+                className="border border-gray-300 p-2 rounded-md text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100"
+              >
+                <option value="manual">Manual</option>
+                <option value="automatic">Automática</option>
+              </select>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {validationMode === 'automatic' ? 'API valida as respostas ao encerrar.' : 'Administrador valida as respostas.'}
+              </span>
+            </div>
+            <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+              <label htmlFor="accent-rule" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Acentos:
+              </label>
+              <select
+                id="accent-rule"
+                value={requireAccents ? 'required' : 'optional'}
+                onChange={handleAccentRuleChange}
+                disabled={roundStarted || roundEnded}
+                className="border border-gray-300 p-2 rounded-md text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100"
+              >
+                <option value="optional">Com ou sem acento</option>
+                <option value="required">Acento obrigatório</option>
+              </select>
             </div>
           </div>
         )}

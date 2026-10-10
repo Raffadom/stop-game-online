@@ -507,11 +507,31 @@ async function processAutomaticValidation(room) {
         return;
     }
 
-    const result = await validateAnswer({
+    let result;
+    try {
+        result = await validateAnswer({
+            answer: currentItem.answer,
+            letter: config.currentLetter,
+            theme: currentItem.theme,
+            requireAccents: Boolean(config.requireAccents)
+        });
+    } catch (error) {
+        result = {
+            status: 'failed',
+            reason: 'Erro inesperado ao consultar a fonte de validação',
+            provider: 'validation-service',
+            errorCode: error.code || 'UNEXPECTED_ERROR'
+        };
+    }
+
+    console.log(`[Validation] ${room} item ${config.currentValidation + 1}/${config.validationQueue.length}`, {
         answer: currentItem.answer,
-        letter: config.currentLetter,
         theme: currentItem.theme,
-        requireAccents: Boolean(config.requireAccents)
+        letter: config.currentLetter,
+        status: result.status,
+        provider: result.provider,
+        reason: result.reason,
+        errorCode: result.errorCode
     });
 
     const player = config.playersAnswers.find(item => item.playerId === currentItem.playerId);
@@ -529,6 +549,8 @@ async function processAutomaticValidation(room) {
         status: result.status,
         reason: result.reason,
         errorCode: result.errorCode,
+        provider: result.provider,
+        validationMode: 'automatic',
         playerNickname: currentItem.playerNickname,
         answer: currentItem.answer,
         theme: currentItem.theme

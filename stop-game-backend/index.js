@@ -4,6 +4,7 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const { Server } = require("socket.io");
+const { randomInt } = require('crypto');
 const admin = require('firebase-admin');
 const { validateAnswer } = require('./validation-service');
 
@@ -336,7 +337,7 @@ const gameUtils = {
 const gameState = new Map();
 
 // Sistema de sorteio de letras sem repetição
-const roomLettersUsed = new Map();
+const roomLetterCycles = new Map();
 const ALL_LETTERS = [
     'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 
     'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 
@@ -346,42 +347,42 @@ const ALL_LETTERS = [
 // ✅ NOVO: Letras excluídas por configuração
 const EXCLUDED_LETTERS = ['X', 'W', 'Y', 'Z'];
 
-// ✅ MELHORADO: Função para sortear letra sem repetição com filtros
+function createLetterCycle(excludeXWYZ) {
+    const letters = excludeXWYZ
+        ? ALL_LETTERS.filter(letter => !EXCLUDED_LETTERS.includes(letter))
+        : [...ALL_LETTERS];
+
+    // Fisher-Yates com fonte criptográfica evita sequências previsíveis entre partidas.
+    for (let index = letters.length - 1; index > 0; index--) {
+        const randomIndex = randomInt(index + 1);
+        [letters[index], letters[randomIndex]] = [letters[randomIndex], letters[index]];
+    }
+
+    return letters;
+}
+
 function getRandomLetterForRoom(room, excludeXWYZ = false) {
-    if (!roomLettersUsed.has(room)) {
-        roomLettersUsed.set(room, []);
+    let cycle = roomLetterCycles.get(room);
+    if (!cycle || cycle.excludeXWYZ !== excludeXWYZ || cycle.remaining.length === 0) {
+        cycle = {
+            excludeXWYZ,
+            remaining: createLetterCycle(excludeXWYZ)
+        };
+        roomLetterCycles.set(room, cycle);
     }
-    
-    // ✅ NOVO: Aplicar filtro de letras baseado na configuração da sala
-    let allowedLetters = [...ALL_LETTERS];
-    if (excludeXWYZ) {
-        allowedLetters = allowedLetters.filter(letter => !EXCLUDED_LETTERS.includes(letter));
-    }
-    
-    const usedLetters = roomLettersUsed.get(room);
-    const availableLetters = allowedLetters.filter(letter => !usedLetters.includes(letter));
-    
-    if (availableLetters.length === 0) {
-        console.log(`[Letter System] Todas as letras foram usadas na sala ${room}. Reiniciando ciclo.`);
-        roomLettersUsed.set(room, []);
-        return getRandomLetterForRoom(room, excludeXWYZ);
-    }
-    
-    const randomIndex = Math.floor(Math.random() * availableLetters.length);
-    const selectedLetter = availableLetters[randomIndex];
-    
-    usedLetters.push(selectedLetter);
-    roomLettersUsed.set(room, usedLetters);
-    
-    const totalAllowed = excludeXWYZ ? allowedLetters.length : ALL_LETTERS.length;
-    console.log(`[Letter System] Sala ${room}: Letra '${selectedLetter}' sorteada. Filtro XWYZ: ${excludeXWYZ ? 'Ativo' : 'Inativo'}. Usadas: [${usedLetters.join(', ')}]. Restantes: ${totalAllowed - usedLetters.length}`);
+
+    const selectedLetter = cycle.remaining.pop();
+    const totalAllowed = excludeXWYZ
+        ? ALL_LETTERS.length - EXCLUDED_LETTERS.length
+        : ALL_LETTERS.length;
+    console.log(`[Letter System] Sala ${room}: Letra '${selectedLetter}' sorteada. Filtro XWYZ: ${excludeXWYZ ? 'Ativo' : 'Inativo'}. Restantes: ${cycle.remaining.length}/${totalAllowed}`);
     
     return selectedLetter;
 }
 
 function clearRoomLetters(room) {
-    if (roomLettersUsed.has(room)) {
-        roomLettersUsed.delete(room);
+    if (roomLetterCycles.has(room)) {
+        roomLetterCycles.delete(room);
         console.log(`[Letter System] Letras usadas da sala ${room} foram limpas.`);
     }
 }
@@ -2021,6 +2022,7 @@ io.on('connection', (socket) => {
             }
 
             config.gameEnded = true;
+            clearRoomLetters(room);
 
             const finalRanking = [];
             const roomSockets = io.sockets.adapter.rooms.get(room);

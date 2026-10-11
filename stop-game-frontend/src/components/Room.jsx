@@ -126,7 +126,16 @@ export default function Room({
   };
 
   const handleDurationChange = (e) => {
-    setRoomDuration(Number(e.target.value));
+    setRoomDuration(e.target.value === '' ? '' : Number(e.target.value));
+  };
+
+  const handleDurationBlur = () => {
+    if (roomDuration === '' || Number.isNaN(Number(roomDuration))) {
+      setRoomDuration(10);
+      return;
+    }
+
+    setRoomDuration(Math.min(300, Math.max(10, Number(roomDuration))));
   };
   
   const saveButtonText = isRoomSaved ? '✅ Sala Salva' : '💾 Salvar Sala';
@@ -317,6 +326,7 @@ export default function Room({
                 type="number"
                 value={roomDuration}
                 onChange={handleDurationChange}
+                onBlur={handleDurationBlur}
                 className="w-24 border border-gray-300 p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-green-400 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
                 min={10}
                 max={300}

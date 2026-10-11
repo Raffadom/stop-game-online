@@ -60,7 +60,7 @@ O Stop Online é uma versão digital fiel ao jogo tradicional de palavras, onde 
 - **Validação por juiz**: Admin ou jogador designado valida as respostas
 - **Modo automático**: O administrador pode escolher correção manual ou automática antes de iniciar a rodada
 - **Regra de acentos**: O administrador pode aceitar respostas com ou sem acento ou exigir a grafia acentuada
-- **API gratuita**: O modo automático consulta o Datamuse no backend, sem expor credenciais no navegador
+- **Validação automática por domínio**: O backend escolhe a fonte adequada para cada tema, sem expor credenciais no navegador
 - **Falhas controladas**: Timeout ou indisponibilidade da API marca a resposta como falha e não interrompe a rodada
 - **Processo tema por tema**: Validação organizada por categoria
 - **Pontuação inteligente**:
@@ -71,13 +71,18 @@ O Stop Online é uma versão digital fiel ao jogo tradicional de palavras, onde 
 
 #### Configuração da validação automática
 
-O modo automático usa uma estratégia híbrida e gratuita, sem chave:
+O modo automático usa validação por domínio, evitando tratar todos os temas como palavras genéricas:
 
-- `IBGE Localidades` para municípios brasileiros;
-- `i18n-iso-countries` para países e traduções em português;
+- `IBGE Localidades` e `IBGE Nomes` para cidades brasileiras e nomes;
+- `ViaCEP` para respostas numéricas de CEP;
+- `i18n-iso-countries` para países e aliases em português;
 - `OpenStreetMap Nominatim` para cidades internacionais;
-- catálogo local para animais comuns, incluindo `rinoceronte` e `hipopótamo`;
-- `Datamuse` como fallback para categorias gerais.
+- `TVMaze` sem chave ou `TMDB` com `TMDB_API_KEY` para filmes, séries e novelas;
+- `TheMealDB` para pratos de comida;
+- catálogos locais para marcas, cores, animais, frutas, objetos, pontos turísticos, profissões e doces;
+- `Datamuse` somente como fallback para temas personalizados.
+
+As fontes externas usam comparação exata após normalização, timeout e fallback controlado. Uma API indisponível produz estado `failed`, não uma resposta inválida. Para TMDB, configure `TMDB_API_KEY`; sem essa chave, o TVMaze é usado automaticamente.
 
 O backend valida localmente a letra inicial e exige pelo menos duas letras. Para categorias gerais, o endpoint do Datamuse pode ser substituído por outro compatível através de `VALIDATION_API_URL`.
 

@@ -539,7 +539,7 @@ async function processAutomaticValidation(room) {
     const answer = player && themeIndex !== -1 ? player.answers[themeIndex] : null;
 
     if (answer) {
-        answer.valid = result.status === 'valid';
+        answer.valid = result.status === 'failed' ? null : result.status === 'valid';
         answer.validationStatus = result.status;
         answer.reason = result.reason;
     }

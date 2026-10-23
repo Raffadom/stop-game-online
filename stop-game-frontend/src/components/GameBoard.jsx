@@ -905,7 +905,7 @@ function GameBoard({
                   key={`${a.theme}-${i}`}
                   className="bg-gray-50 p-4 rounded shadow-sm dark:bg-gray-700"
                 >
-                  <label className="block text-gray-700 font-semibold mb-1 dark:text-gray-100">
+                  <label className="flex min-h-12 items-center justify-center text-center leading-6 text-gray-700 font-semibold mb-1 dark:text-gray-100">
                     {a.theme}
                   </label>
                   <input

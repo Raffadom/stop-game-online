@@ -142,6 +142,10 @@ function invalidResult(reason, provider) {
     return { status: 'invalid', reason, provider };
 }
 
+function reviewResult(reason, provider) {
+    return { status: 'review', reason, provider };
+}
+
 function failedResult(provider, error) {
     return {
         status: 'failed',
@@ -286,7 +290,7 @@ async function validateMedia(answer, client, timeout, requireAccents) {
         const exactMatch = results.some(item => matchesAnswer(item.show && item.show.name, answer, requireAccents));
         return exactMatch
             ? validResult('Série encontrada no TVMaze', 'tvmaze')
-            : invalidResult('Filme ou série não encontrado no TVMaze', 'tvmaze');
+            : reviewResult('Título não confirmado automaticamente no TVMaze; requer revisão', 'tvmaze');
     } catch (error) {
         return failedResult('tvmaze', error);
     }
@@ -302,7 +306,7 @@ async function validateMeal(answer, client, timeout, requireAccents) {
         const exactMatch = meals.some(meal => matchesAnswer(meal.strMeal, answer, requireAccents));
         return exactMatch
             ? validResult('Prato encontrado no TheMealDB', 'themealdb')
-            : invalidResult('Prato não encontrado no TheMealDB', 'themealdb');
+            : reviewResult('Prato não confirmado automaticamente no TheMealDB; requer revisão', 'themealdb');
     } catch (error) {
         return failedResult('themealdb', error);
     }
@@ -455,8 +459,12 @@ async function validateAnswer({ answer, letter, theme, requireAccents = false, t
         const exactMatch = words.some(word => matchesAnswer(word.word, answer, requireAccents));
 
         return {
-            status: exactMatch ? 'valid' : 'invalid',
-            reason: exactMatch ? `Resposta encontrada para o tema ${theme}` : 'Resposta não encontrada na API',
+            status: exactMatch ? 'valid' : (requireAccents ? 'invalid' : 'review'),
+            reason: exactMatch
+                ? `Resposta encontrada para o tema ${theme}`
+                : requireAccents
+                    ? 'Resposta não encontrada com a regra de acentos exigida'
+                    : 'Resposta não confirmada pela API; requer revisão',
             provider: 'datamuse'
         };
     } catch (error) {

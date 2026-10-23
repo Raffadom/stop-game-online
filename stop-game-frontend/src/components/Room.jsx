@@ -68,6 +68,9 @@ export default function Room({
   setRequireAccents,
 }) {
   const [showCopiedMessage, setShowCopiedMessage] = useState(false);
+  const [showRestartOptions, setShowRestartOptions] = useState(false);
+  const [keepLetterOnRestart, setKeepLetterOnRestart] = useState(true);
+  const [clearAnswersOnRestart, setClearAnswersOnRestart] = useState(true);
 
   // ✅ Handlers para filtro de letras
   const handleLetterFilterChange = (filterType) => {
@@ -90,6 +93,23 @@ export default function Room({
     const nextValue = event.target.value === 'required';
     setRequireAccents(nextValue);
     socket.emit('update_accent_rule', { room, requireAccents: nextValue });
+  };
+
+  const handleTransferAdmin = (event) => {
+    const targetUserId = event.target.value;
+    if (targetUserId) {
+      socket.emit('transfer_admin', { room, userId: targetUserId });
+      event.target.value = '';
+    }
+  };
+
+  const handleRestartRound = () => {
+    socket.emit('restart_round', {
+      room,
+      keepLetter: keepLetterOnRestart,
+      clearAnswers: clearAnswersOnRestart
+    });
+    setShowRestartOptions(false);
   };
 
   useEffect(() => {
@@ -277,6 +297,24 @@ export default function Room({
                 <option value="required">Acento obrigatório</option>
               </select>
             </div>
+            <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+              <label htmlFor="admin-transfer" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Administrador:
+              </label>
+              <select
+                id="admin-transfer"
+                defaultValue=""
+                onChange={handleTransferAdmin}
+                className="border border-gray-300 p-2 rounded-md text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100"
+              >
+                <option value="">Transferir para...</option>
+                {playersInRoom
+                  .filter(player => player.userId !== userId)
+                  .map(player => (
+                    <option key={player.userId} value={player.userId}>{player.nickname}</option>
+                  ))}
+              </select>
+            </div>
           </div>
         )}
         
@@ -345,6 +383,7 @@ export default function Room({
         {roundStarted && (countdown === null || countdown === undefined) && (
           <>
             <Timer 
+              key={`round-timer-${resetRoundFlag}`}
               duration={roomDuration} 
               room={room} 
               onTimeUp={handleTimeUp} // CORREÇÃO: Passar a função onTimeUp
@@ -362,7 +401,36 @@ export default function Room({
                 Você clicou em STOP! Aguardando outros jogadores...
               </div>
             )}
+            {isAdmin && (
+              <button
+                onClick={() => setShowRestartOptions(true)}
+                className="bg-orange-600 hover:bg-orange-700 text-white px-5 py-2 rounded-lg shadow-md transition-colors duration-200"
+              >
+                ⏸️ Pausar e reiniciar rodada
+              </button>
+            )}
           </>
+        )}
+        {showRestartOptions && (
+          <div className="w-full max-w-lg rounded-lg border border-orange-300 bg-orange-50 p-4 text-gray-800 dark:border-orange-700 dark:bg-orange-900/30 dark:text-gray-100">
+            <h3 className="font-bold">Opções para reiniciar a rodada</h3>
+            <label className="mt-3 flex items-center gap-2">
+              <input type="checkbox" checked={keepLetterOnRestart} onChange={e => setKeepLetterOnRestart(e.target.checked)} />
+              Manter a letra sorteada
+            </label>
+            <label className="mt-2 flex items-center gap-2">
+              <input type="checkbox" checked={clearAnswersOnRestart} onChange={e => setClearAnswersOnRestart(e.target.checked)} />
+              Limpar todas as respostas digitadas
+            </label>
+            <div className="mt-4 flex gap-2">
+              <button onClick={handleRestartRound} className="rounded bg-orange-600 px-4 py-2 font-semibold text-white hover:bg-orange-700">
+                Reiniciar agora
+              </button>
+              <button onClick={() => setShowRestartOptions(false)} className="rounded bg-gray-300 px-4 py-2 font-semibold text-gray-800 dark:bg-gray-600 dark:text-gray-100">
+                Cancelar
+              </button>
+            </div>
+          </div>
         )}
       </div>
 

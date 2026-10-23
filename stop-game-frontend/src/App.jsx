@@ -48,6 +48,7 @@ function App() {
   const [requireAccents, setRequireAccents] = useState(false);
 
   const timerRef = useRef(null);
+  const reconnectRequestedRef = useRef(false);
   const [timeLeft, setTimeLeft] = useState(0);
 
   // ✅ ADICIONAR: Hook de persistência
@@ -67,8 +68,9 @@ function App() {
     
     setCurrentPage('room');
     setPlayersInRoom(data.players || []);
-    setIsAdmin(data.player?.isCreator || false);
+    setIsAdmin(Boolean(data.player?.isCreator));
     setIsReconnecting(false);
+    reconnectRequestedRef.current = false;
     
     // Salvar sessão
     saveSession({
@@ -105,7 +107,8 @@ function App() {
   const handlePlayersUpdate = useCallback((players) => {
     console.log('[App] Lista de jogadores atualizada:', players);
     setPlayersInRoom(players || []);
-  }, []);
+    setIsAdmin(Boolean(players?.some(player => player.userId === userId && player.isCreator)));
+  }, [userId]);
 
   const handleRoundStartCountdown = useCallback((data) => {
     console.log('[App] Countdown iniciado:', data);
@@ -182,6 +185,9 @@ function App() {
     setLetter(data.letter || '');
     setStopClickedByMe(false);
     setResetRoundFlag(prev => prev + 1);
+    if (typeof data.duration === 'number' && data.duration > 0) {
+      setRoomDuration(data.duration);
+    }
     
     // Reiniciar timer
     if (data.duration) {
@@ -443,7 +449,8 @@ function App() {
     const session = loadSession();
     const validation = loadValidationState();
     
-    if (session && session.roomName && session.userId && session.nickname) {
+    if (session && session.roomName && session.userId && session.nickname && !reconnectRequestedRef.current) {
+      reconnectRequestedRef.current = true;
       console.log('[App] Detectada sessão anterior - tentando reconectar:', session);
       
       if (validation) {

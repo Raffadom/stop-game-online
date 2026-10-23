@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { socket } from "../socket";
 // Modal inline usado diretamente no JSX para garantir dark mode
 
@@ -54,6 +54,13 @@ function GameBoard({
   
   // ✅ ADICIONAR: Estado para mostrar botão de retomar validação
   const [showResumeButton, setShowResumeButton] = useState(false);
+  const roomThemesRef = useRef(roomThemes);
+  const answersSubmittedRef = useRef(answersSubmitted);
+  const validationDataRef = useRef(validationData);
+
+  roomThemesRef.current = roomThemes;
+  answersSubmittedRef.current = answersSubmitted;
+  validationDataRef.current = validationData;
 
   const maxThemes = 20;
 
@@ -127,7 +134,7 @@ function GameBoard({
     setShowRoundResult(false);
     setRoundScore(null);
     
-    if (roomThemes && roomThemes.length > 0) {
+    if (roomThemesRef.current && roomThemesRef.current.length > 0) {
       // ✅ CORRIGIR: Adicionar parênteses na função map
       setAnswers(roomThemes.map(theme => ({ 
         theme, 
@@ -156,7 +163,7 @@ function GameBoard({
 
   const handleLeaveRoom = useCallback(() => {
     console.log('[GameBoard] Saindo da sala...');
-    socket.emit("leave_room");
+    socket.emit("leave_room", { userId, room });
     
     setTimeout(() => {
       window.location.href = '/';
@@ -424,10 +431,13 @@ function GameBoard({
       
       setAnswers(prevAnswers => {
         if (roomThemes && roomThemes.length > 0) {
-          console.log('[GameBoard] Resetando respostas para nova rodada');
-          return roomThemes.map(theme => ({ 
+          const keepAnswers = data.answersCleared === false;
+          console.log(`[GameBoard] ${keepAnswers ? 'Preservando' : 'Resetando'} respostas para nova rodada`);
+          return roomThemesRef.current.map(theme => ({
             theme, 
-            answer: "", 
+            answer: keepAnswers
+              ? (prevAnswers.find(answer => answer.theme === theme)?.answer || "")
+              : "",
             points: null, 
             reason: "", 
             validated: false 
@@ -447,7 +457,7 @@ function GameBoard({
       console.log('[GameBoard] ⏰ Tempo esgotado - rodada finalizada');
       
       setAnswers(prevAnswers => {
-        if (prevAnswers.length > 0 && !answersSubmitted) {
+        if (prevAnswers.length > 0 && !answersSubmittedRef.current) {
           console.log('[GameBoard] ⏰ Enviando respostas devido ao tempo esgotado');
           const answersToSubmit = prevAnswers.map(a => ({
             theme: a.theme,
@@ -568,7 +578,7 @@ function GameBoard({
       setRevealed(true);
       setIsRevealing(false);
       
-      if (validationData) {
+      if (validationDataRef.current) {
         setValidationData(prevData => ({
           ...prevData,
           isRevealed: true,
@@ -658,7 +668,7 @@ function GameBoard({
       socket.off("validation_cancelled", handleValidationCancelled);
       socket.off('validation_error', handleValidationError);
     };
-  }, [room, setRoomThemes, roomThemes, answersSubmitted, handleValidationCompleteForPlayer, handleGameEnded, handleNoAnswersToValidate, userId, validationData, setAlertState]);
+  }, [room, setRoomThemes, handleValidationCompleteForPlayer, handleGameEnded, handleNoAnswersToValidate, userId, setAlertState]);
 
   // ✅ useEffect para configuração inicial
   useEffect(() => {
@@ -988,7 +998,12 @@ function GameBoard({
                         <div className="flex flex-wrap gap-2">
                           <button
                             onClick={() => handleReviewStatus(player.playerId, answer.theme, answer.valid !== true)}
-                            className={`px-3 py-2 rounded-md text-white text-sm font-semibold ${answer.valid === true ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
+                            disabled={answer.valid !== true && [...(answer.answer || '').trim()].length < 2}
+                            className={`px-3 py-2 rounded-md text-white text-sm font-semibold ${
+                              answer.valid === true
+                                ? 'bg-red-600 hover:bg-red-700'
+                                : 'bg-green-600 hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400'
+                            }`}
                           >
                             {answer.valid === true ? 'Marcar inválida' : 'Marcar válida'}
                           </button>
@@ -1084,8 +1099,14 @@ function GameBoard({
           {showModal && validationData && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                {validationData.automatic && (
+                  <div className="flex min-h-48 flex-col items-center justify-center gap-4 p-8 text-center" role="status" aria-live="polite">
+                    <div className="h-12 w-12 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600" />
+                    <p className="text-xl font-semibold text-gray-800 dark:text-gray-100">Corrigindo, aguarde!!!</p>
+                  </div>
+                )}
                 {/* Header */}
-                <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+                <div className={validationData.automatic ? "hidden" : "flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700"}>
                   <h2 className="text-2xl font-bold text-gray-800 dark:text-white">
                     {validationData.automatic ? "🤖 Correção Automática" : validationData.isValidator ? "✏️ Validação de Resposta" : "👀 Acompanhando Validação"}
                   </h2>
@@ -1109,7 +1130,7 @@ function GameBoard({
                 </div>
                 
                 {/* Content */}
-                <div className="p-6">
+                <div className={validationData.automatic ? "hidden" : "p-6"}>
                   <div className="space-y-4">
                     <div className="bg-gray-200 dark:bg-gray-700 rounded-full h-2 mb-4">
                       <div 
@@ -1148,14 +1169,16 @@ function GameBoard({
 
                 {validationData.showResult && validationData.resultData && (
                   <div className={`p-4 rounded-lg text-center ${
-                    validationData.resultData.status === 'failed'
+                                validationData.resultData.status === 'failed' || validationData.resultData.status === 'review'
                       ? 'bg-yellow-100 dark:bg-yellow-900/30 border-yellow-500 border-2'
                       : validationData.resultData.valid
                         ? 'bg-green-100 dark:bg-green-900/30 border-green-500 border-2'
                         : 'bg-red-100 dark:bg-red-900/30 border-red-500 border-2'
                   }`}>
                         <p className="font-bold text-lg text-gray-800 dark:text-gray-200">
-                      {validationData.resultData.status === 'failed'
+                      {validationData.resultData.status === 'review'
+                        ? '⚠️ REVISÃO NECESSÁRIA'
+                        : validationData.resultData.status === 'failed'
                         ? '⚠️ API INDISPONÍVEL'
                         : validationData.resultData.valid ? '✅ VÁLIDA' : '❌ INVÁLIDA'}
                         </p>

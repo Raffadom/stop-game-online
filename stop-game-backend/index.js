@@ -317,6 +317,17 @@ function emitRoomConfig(roomId, config) {
     io.to(roomId).emit("room_config", sanitizeRoomConfig(config));
 }
 
+function toDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value.toDate === 'function') return value.toDate();
+    if (typeof value._seconds === 'number') {
+        return new Date(value._seconds * 1000 + Math.floor((value._nanoseconds || 0) / 1e6));
+    }
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 // ------------------------
 // Estado do servidor
 // ------------------------
@@ -540,13 +551,17 @@ async function processAutomaticValidation(room) {
     const answer = player && themeIndex !== -1 ? player.answers[themeIndex] : null;
 
     if (answer) {
-        answer.valid = result.status === 'failed' ? null : result.status === 'valid';
+        answer.valid = result.status === 'failed' || result.status === 'review'
+            ? null
+            : result.status === 'valid';
         answer.validationStatus = result.status;
         answer.reason = result.reason;
     }
 
     io.to(room).emit("answer_validated", {
-        valid: result.status === 'failed' ? null : result.status === 'valid',
+        valid: result.status === 'failed' || result.status === 'review'
+            ? null
+            : result.status === 'valid',
         status: result.status,
         reason: result.reason,
         errorCode: result.errorCode,
@@ -582,6 +597,14 @@ function applyThemeScoring(room, themeIndex, allAnswers, themes) {
             if (answer.valid === false) {
                 answer.points = 0;
                 answer.reason = "Invalidada pelo juiz";
+                return;
+            }
+
+            if (answer.valid !== true) {
+                answer.points = 0;
+                answer.reason = answer.validationStatus === 'review'
+                    ? "Aguardando revisão do administrador"
+                    : "Resposta não confirmada";
                 return;
             }
             
@@ -706,6 +729,12 @@ function applyReviewStatus(room, playerId, theme, valid) {
     const player = config.playersAnswers.find(item => item.playerId === playerId);
     const answer = player && player.answers.find(item => item.theme === theme);
     if (!answer) return false;
+
+    // Respostas vazias ou com apenas um caractere nunca podem ser aprovadas.
+    const normalizedAnswer = normalizeAnswer(answer.answer);
+    if (valid && [...normalizedAnswer].length < 2) {
+        return false;
+    }
 
     answer.valid = valid;
     answer.validationStatus = valid ? 'valid' : 'invalid';
@@ -1028,8 +1057,8 @@ function cleanupDisconnectedPlayers() {
             
             Object.values(config.players).forEach(player => {
                 if (player.disconnectedAt) {
-                    const disconnectedTime = new Date(player.disconnectedAt);
-                    const timeDiff = now - disconnectedTime;
+                    const disconnectedTime = toDate(player.disconnectedAt);
+                    const timeDiff = disconnectedTime ? now - disconnectedTime : 0;
                     
                     if (timeDiff > CLEANUP_TIMEOUT) {
                         playersToRemove.push(player.userId);
@@ -1095,7 +1124,12 @@ function transferAdminRole(room) {
     }
 
     // Encontrar o jogador mais antigo para ser o novo admin
-    const sortedPlayers = players.sort((a, b) => new Date(a.joinedAt) - new Date(b.joinedAt));
+    const sortedPlayers = players.sort((a, b) => {
+        const aJoinedAt = toDate(a.joinedAt);
+        const bJoinedAt = toDate(b.joinedAt);
+        return (aJoinedAt ? aJoinedAt.getTime() : Number.MAX_SAFE_INTEGER)
+            - (bJoinedAt ? bJoinedAt.getTime() : Number.MAX_SAFE_INTEGER);
+    });
     const newAdmin = sortedPlayers[0];
     
     // Atualizar creatorId e isCreator
@@ -1193,8 +1227,9 @@ io.on('connection', (socket) => {
                     Object.entries(savedPlayers).forEach(([playerId, player]) => {
                         // ✅ MELHOR: Verificar se socket realmente existe e está conectado
                         const socketExists = io.sockets.sockets.has(player.socketId);
-                        const disconnectTime = player.disconnectedAt ? (currentTime - new Date(player.disconnectedAt).getTime()) : 0;
-                        const isRecentlyDisconnected = player.disconnectedAt && disconnectTime < MAX_DISCONNECT_TIME;
+                        const disconnectedAt = toDate(player.disconnectedAt);
+                        const disconnectTime = disconnectedAt ? currentTime - disconnectedAt.getTime() : 0;
+                        const isRecentlyDisconnected = Boolean(disconnectedAt && disconnectTime < MAX_DISCONNECT_TIME);
                         
                         console.log(`[Socket.io] 🔍 Verificando ${player.nickname}:`, {
                             socketId: player.socketId,
@@ -1714,6 +1749,36 @@ io.on('connection', (socket) => {
         emitRoomConfig(room, config);
     });
 
+    socket.on('transfer_admin', async ({ room, userId: targetUserId }) => {
+        try {
+            const config = roomConfigs[room];
+            if (!config || socket.userId !== config.creatorId) {
+                socket.emit('room_error', { message: 'Apenas o administrador atual pode transferir a administração' });
+                return;
+            }
+
+            const target = config.players && config.players[targetUserId];
+            if (!target) {
+                socket.emit('room_error', { message: 'Usuário selecionado não está na sala' });
+                return;
+            }
+            if (targetUserId === socket.userId) return;
+
+            config.creatorId = targetUserId;
+            Object.values(config.players).forEach(player => {
+                player.isCreator = player.userId === targetUserId;
+            });
+
+            await saveRoomConfigToFirestore(room, config);
+            const players = Object.values(config.players);
+            io.to(room).emit('players_update', players);
+            emitRoomConfig(room, config);
+        } catch (error) {
+            console.error('[Socket.io] Erro ao transferir administração:', error);
+            socket.emit('room_error', { message: 'Não foi possível transferir a administração' });
+        }
+    });
+
     // ✅ CORRIGIR: Handler save_room para usar a função correta (linha ~950)
     socket.on("save_room", async ({ room, roomName, duration }) => {
         try {
@@ -1964,6 +2029,63 @@ io.on('connection', (socket) => {
         if (answered >= voters.length) finishVote(room);
     });
 
+    socket.on("restart_round", async ({ room, keepLetter = true, clearAnswers = true }) => {
+        try {
+            const config = roomConfigs[room];
+            if (!config || socket.userId !== config.creatorId) {
+                socket.emit('room_error', { message: 'Apenas o administrador pode reiniciar a rodada' });
+                return;
+            }
+
+            if (config.validationInProgress) {
+                socket.emit('room_error', { message: 'Aguarde a conclusão da correção antes de reiniciar a rodada' });
+                return;
+            }
+
+            if (!keepLetter) {
+                config.currentLetter = getRandomLetterForRoom(room, config.excludeXWYZ);
+            }
+            if (clearAnswers) {
+                const roomSockets = io.sockets.adapter.rooms.get(room);
+                if (roomSockets) {
+                    for (const socketId of roomSockets) {
+                        const playerSocket = io.sockets.sockets.get(socketId);
+                        if (playerSocket) delete playerSocket.submittedAnswers;
+                    }
+                }
+                Object.values(config.players || {}).forEach(player => {
+                    delete player.lastSubmittedAnswers;
+                });
+            }
+
+            config.roundActive = true;
+            config.roundEnded = false;
+            config.stopClickedByMe = false;
+            config.isCountingDown = false;
+            config.gameEnded = false;
+            delete config.lastRoundAnswers;
+            delete config.playersAnswers;
+            delete config.roundScores;
+            delete config.reviewAvailable;
+            if (config.activeVote) {
+                clearTimeout(config.activeVote.timeoutId);
+                delete config.activeVote;
+            }
+
+            io.to(room).emit('new_round_started', {
+                message: 'Rodada reiniciada!',
+                themes: config.themes,
+                letter: config.currentLetter,
+                duration: config.duration,
+                answersCleared: Boolean(clearAnswers)
+            });
+            emitRoomConfig(room, config);
+        } catch (error) {
+            console.error('[Socket.io] Erro ao reiniciar rodada:', error);
+            socket.emit('room_error', { message: 'Não foi possível reiniciar a rodada' });
+        }
+    });
+
     socket.on("new_round", async ({ room, resetLetters = false }) => {
         try {
             const config = roomConfigs[room];
@@ -2001,7 +2123,8 @@ io.on('connection', (socket) => {
 
             io.to(room).emit("new_round_started", {
                 message: "Nova rodada iniciada!",
-                themes: config.themes
+                themes: config.themes,
+                duration: config.duration
             });
             
             emitRoomConfig(room, config);
@@ -2070,7 +2193,7 @@ io.on('connection', (socket) => {
     });
 
     // ✅ Handler para saída voluntária da sala
-    socket.on('leave_room', async ({ userId, room }) => {
+    socket.on('leave_room', async ({ userId, room } = {}) => {
         try {
             const targetUserId = userId || socket.userId;
             const targetRoom = room || socket.roomId;

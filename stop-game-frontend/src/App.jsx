@@ -172,7 +172,7 @@ function App() {
     
     setAlertState({
       isVisible: true,
-      message: 'Tempo esgotado!',
+      message: data.message || `O jogador ${data.validatorNickname || 'desconhecido'} deu STOP!!!`,
       type: 'warning'
     });
   }, []);
@@ -180,9 +180,10 @@ function App() {
   const handleNewRoundStarted = useCallback((data) => {
     console.log('[App] Nova rodada iniciada:', data);
     
-    setRoundStarted(true);
+    setRoundStarted(!data.startsWithCountdown);
     setRoundEnded(false);
     setLetter(data.letter || '');
+    setCountdown(null);
     setStopClickedByMe(false);
     setResetRoundFlag(prev => prev + 1);
     if (typeof data.duration === 'number' && data.duration > 0) {

@@ -131,6 +131,7 @@ function GameBoard({
     }
     
     console.log('[GameBoard] Solicitando nova rodada...');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     setShowRoundResult(false);
     setRoundScore(null);
     

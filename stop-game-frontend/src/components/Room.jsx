@@ -71,6 +71,7 @@ export default function Room({
   const [showRestartOptions, setShowRestartOptions] = useState(false);
   const [keepLetterOnRestart, setKeepLetterOnRestart] = useState(true);
   const [clearAnswersOnRestart, setClearAnswersOnRestart] = useState(true);
+  const [isAdminOptionsCollapsed, setIsAdminOptionsCollapsed] = useState(false);
 
   // ✅ Handlers para filtro de letras
   const handleLetterFilterChange = (filterType) => {
@@ -233,6 +234,19 @@ export default function Room({
         {/* ✅ Filtros de Letras (apenas para admin) */}
         {isAdmin && (
           <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg border border-gray-200 dark:border-gray-600">
+            <button
+              type="button"
+              onClick={() => setIsAdminOptionsCollapsed(prev => !prev)}
+              className="mb-3 rounded-md px-2 py-1 text-sm text-gray-600 hover:bg-gray-200 dark:text-gray-200 dark:hover:bg-gray-600"
+              aria-expanded={!isAdminOptionsCollapsed}
+              aria-controls="admin-options-content"
+            >
+              {isAdminOptionsCollapsed ? 'Mostrar opções' : 'Minimizar opções'}
+            </button>
+            <div
+              id="admin-options-content"
+              className={isAdminOptionsCollapsed ? 'hidden' : ''}
+            >
             <div className="flex items-center space-x-4">
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 Letras:
@@ -314,6 +328,7 @@ export default function Room({
                     <option key={player.userId} value={player.userId}>{player.nickname}</option>
                   ))}
               </select>
+            </div>
             </div>
           </div>
         )}

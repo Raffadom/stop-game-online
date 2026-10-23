@@ -1898,7 +1898,11 @@ io.on('connection', (socket) => {
             config.roundEnded = true;
             config.stopClickedByMe = socket.userId;
 
-            io.to(room).emit('time_up_round_ended', { validatorId });
+            io.to(room).emit('time_up_round_ended', {
+                validatorId,
+                validatorNickname: socket.nickname,
+                message: `O jogador ${socket.nickname} deu STOP!!!`
+            });
             emitRoomConfig(room, config);
 
             setTimeout(() => {
@@ -2124,10 +2128,12 @@ io.on('connection', (socket) => {
             io.to(room).emit("new_round_started", {
                 message: "Nova rodada iniciada!",
                 themes: config.themes,
-                duration: config.duration
+                duration: config.duration,
+                startsWithCountdown: true
             });
             
             emitRoomConfig(room, config);
+            startRoundCountdown(room);
             
         } catch (error) {
             console.error('[Socket.io] Error starting new round:', error);
